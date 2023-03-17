@@ -24,4 +24,9 @@ setuptools.setup(
         "lark-parser",
         "networkx",
     ],
+    entry_points= {
+        'console_scripts': [
+            'qua=cli.cli:cli',
+        ],
+    }
 )

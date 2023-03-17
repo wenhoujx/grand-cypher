@@ -1,0 +1,20 @@
+version: 1 
+
+sources: 
+  - name: raw_customer 
+    type: csv 
+    path: ./testing/test1/raw_customers.csv
+models:
+  - name: Customer
+    source: raw_customer
+    columns: 
+    - name: id
+    - name: first_name 
+    - name: last_name 
+  - name: Company
+    source: raw_customer
+    columns:
+    - name: company
+     
+
+    

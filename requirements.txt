@@ -1,3 +1,4 @@
 grandiso
 lark-parser
 networkx
+click
