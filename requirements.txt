@@ -2,3 +2,7 @@ grandiso
 lark-parser
 networkx
 click
+pypika
+pyyaml
+duckdb
+toolz

@@ -7,6 +7,7 @@ to search in a much larger graph database.
 
 """
 from typing import Dict, List, Callable, Tuple
+from pypika import Query, Table, Field
 import random
 import string
 from functools import lru_cache
@@ -15,6 +16,9 @@ import networkx as nx
 import grandiso
 
 from lark import Lark, Transformer, v_args, Token
+
+from grandcypher.constants import FILTERS, NAME, TYPE
+from grandcypher.schema import source_name
 
 
 _OPERATORS = {
@@ -279,8 +283,9 @@ _BOOL_ARI = {
 
 
 class _GrandCypherTransformer(Transformer):
-    def __init__(self, target_graph: nx.Graph):
-        self._target_graph = target_graph
+    def __init__(self, schema):
+        self._target_graph = None
+        self.schema =schema
         self._where_condition: CONDITION = None
         self._motif = nx.DiGraph()
         self._matches = None
@@ -290,6 +295,8 @@ class _GrandCypherTransformer(Transformer):
         self._limit = None
         self._skip = 0
         self._max_hop = 100
+        self.entities = []
+        self.joins= []
 
     def _lookup(self, data_path):
         if not isinstance(data_path, str):
@@ -353,7 +360,22 @@ class _GrandCypherTransformer(Transformer):
                 for r in self._return_requests
             }
         return {r: self._lookup(r)[self._skip :] for r in self._return_requests}
-
+    
+    def sql(self): 
+        if len(self.entities) > 1: 
+            #TODO: handle multiple entities. 
+            raise NotImplementedError("only one entity is supported for now")
+        q = None
+        for entity in self.entities: 
+            entity_table = Table(source_name(self.schema, entity[TYPE])).as_(entity[NAME])
+            q = Query.from_(entity_table)
+            rets = [ret for ret in self._return_requests if ret.split('.')[0]== entity[NAME]]
+            for ret in rets: 
+                q = q.select(Field(ret.split('.')[1], table = entity_table))
+            
+        return str(q)
+        
+    
     def _get_true_matches(self):
         # filter the matches based upon the conditions of the where clause:
         # TODO: promote these to inside the monomorphism search
@@ -504,7 +526,6 @@ class _GrandCypherTransformer(Transformer):
                 node_type = token.value
         cname = cname or Token("CNAME", shortuuid())
         json_data = json_data or {}
-        node_type = set([node_type]) if node_type else set()
 
         return (cname, node_type, json_data)
 
@@ -513,6 +534,11 @@ class _GrandCypherTransformer(Transformer):
             # This is just a node match:
             u, ut, js = match_clause[0]
             self._motif.add_node(u.value, __labels__ = ut, **js)
+            self.entities.append({
+                NAME: u, 
+                TYPE: ut, 
+                FILTERS: js
+            })
             return
         for start in range(0, len(match_clause) - 2, 2):
             ((u, ut, ujs), (g, t, d, minh, maxh), (v, vt, vjs)) = match_clause[start : start + 3]
@@ -540,7 +566,22 @@ class _GrandCypherTransformer(Transformer):
             
             self._motif.add_node(u, __labels__=ut, **ujs)
             self._motif.add_node(v, __labels__=vt, **vjs)
+            self.entities.append({
+                NAME: u, 
+                TYPE: ut, 
+                FILTERS: ujs
+            })
+            self.entities.append({
+                NAME: v, 
+                TYPE: vt, 
+                FILTERS: vjs })
+            self.joins.append({
+                "name": g, 
+                "type": t, 
+                "direction": d
+            })
 
+            
     def where_clause(self, where_clause: tuple):
         self._where_condition = where_clause[0]
     
