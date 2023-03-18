@@ -296,7 +296,7 @@ class _GrandCypherTransformer(Transformer):
         self._skip = 0
         self._max_hop = 100
         self.entities = []
-        self.joins= []
+        self.links= []
 
     def _lookup(self, data_path):
         if not isinstance(data_path, str):
@@ -362,17 +362,21 @@ class _GrandCypherTransformer(Transformer):
         return {r: self._lookup(r)[self._skip :] for r in self._return_requests}
     
     def sql(self): 
-        if len(self.entities) > 1: 
+        sources = set([source_name(self.schema, ent[TYPE]) for ent in self.entities])
+        if len(sources) > 1: 
             #TODO: handle multiple entities. 
-            raise NotImplementedError("only one entity is supported for now")
+            raise NotImplementedError("only one source is supported for now")
         q = None
-        for entity in self.entities: 
-            entity_table = Table(source_name(self.schema, entity[TYPE])).as_(entity[NAME])
-            q = Query.from_(entity_table)
-            rets = [ret for ret in self._return_requests if ret.split('.')[0]== entity[NAME]]
-            for ret in rets: 
-                q = q.select(Field(ret.split('.')[1], table = entity_table))
-            
+        for source in sources:
+            # should only be one source for now. 
+            q = Query.from_(Table(source))
+            select_terms = []
+            for entity in self.entities: 
+                rets = [ret for ret in self._return_requests if ret.split('.')[0]== entity[NAME]]
+                for ret in rets: 
+                    select_terms.append(Field(ret.split('.')[1], table = Table(source_name(self.schema, entity[TYPE]))))
+            q = q.select(*select_terms)
+
         return str(q)
         
     
@@ -575,7 +579,7 @@ class _GrandCypherTransformer(Transformer):
                 NAME: v, 
                 TYPE: vt, 
                 FILTERS: vjs })
-            self.joins.append({
+            self.links.append({
                 "name": g, 
                 "type": t, 
                 "direction": d
@@ -644,6 +648,11 @@ class _GrandCypherTransformer(Transformer):
     def json_rule(self, rule):
         return (rule[0].value, rule[1])
 
+
+def cypher_to_duck(schema, cypher_query) : 
+    t = _GrandCypherTransformer(schema)
+    t.transform(_GrandCypherGrammar.parse(cypher_query))
+    return  t.sql()
 
 class GrandCypher:
     """

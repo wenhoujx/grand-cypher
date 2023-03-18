@@ -4,6 +4,9 @@ sources:
   - name: raw_customers
     type: csv 
     path: ./testing/test1/raw_customers.csv
+  - name: customer_infos
+    type: csv 
+    path: ./testing/test1/customer_infos.csv
 models:
   - name: Customer
     source: raw_customers
@@ -19,6 +22,19 @@ models:
     columns:
     - name: company
       type: string 
+  - name: CustomerInfo
+    source: customer_infos
+    columns:
+    - name: id
+      type: string       
+    - name: age
+      type: integer
+    - name: state
+      type: string
+links: 
+  - a: Customer.id 
+    b: CustomerInfo.id
+    
      
 
     
