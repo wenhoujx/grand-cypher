@@ -1,6 +1,6 @@
 version: 1 
 
-sources: 
+tables: 
   - name: raw_customers
     type: csv 
     path: ./testing/test1/raw_customers.csv
@@ -9,7 +9,7 @@ sources:
     path: ./testing/test1/customer_infos.csv
 models:
   - name: Customer
-    source: raw_customers
+    table: raw_customers
     columns: 
     - name: id
       type: string 
@@ -18,12 +18,12 @@ models:
     - name: last_name 
       type: string 
   - name: Company
-    source: raw_customers
+    table: raw_customers
     columns:
     - name: company
       type: string 
   - name: CustomerInfo
-    source: customer_infos
+    table: customer_infos
     columns:
     - name: id
       type: string       

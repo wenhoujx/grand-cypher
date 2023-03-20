@@ -6,8 +6,13 @@ data/attribute or by structure, using the same language you'd use
 to search in a much larger graph database.
 
 """
+from dataclasses import field
+from distutils.command.build_scripts import first_line_re
+from sys import getfilesystemencoding
+from time import thread_time
+import toolz as tz
 from typing import Dict, List, Callable, Tuple
-from pypika import Query, Table, Field
+from pypika import Query, Table, Field, JoinType
 import random
 import string
 from functools import lru_cache
@@ -17,8 +22,8 @@ import grandiso
 
 from lark import Lark, Transformer, v_args, Token
 
-from grandcypher.constants import FILTERS, NAME, TYPE
-from grandcypher.schema import source_name
+from grandcypher.constants import A, ALIASES, ENTITY, FILTERS, NAME, SELECTS, SOURCE, TABLE, TABLE, TYPE
+from grandcypher.schema import find_join_fields, get_all_fields, get_all_join_fields, get_field, get_field_by_table_and_col, table_name
 
 
 _OPERATORS = {
@@ -361,22 +366,79 @@ class _GrandCypherTransformer(Transformer):
             }
         return {r: self._lookup(r)[self._skip :] for r in self._return_requests}
     
-    def sql(self): 
-        sources = set([source_name(self.schema, ent[TYPE]) for ent in self.entities])
-        if len(sources) > 1: 
-            #TODO: handle multiple entities. 
-            raise NotImplementedError("only one source is supported for now")
-        q = None
-        for source in sources:
-            # should only be one source for now. 
-            q = Query.from_(Table(source))
-            select_terms = []
-            for entity in self.entities: 
-                rets = [ret for ret in self._return_requests if ret.split('.')[0]== entity[NAME]]
-                for ret in rets: 
-                    select_terms.append(Field(ret.split('.')[1], table = Table(source_name(self.schema, entity[TYPE]))))
-            q = q.select(*select_terms)
+    def _get_entity_source(self, entity): 
+        entity_type = entity[TYPE] 
+        entity_alias = entity[NAME]
+        table = Table(table_name(self.schema, entity_type))
+        filters = []
+        for col, val in entity[FILTERS].items():
+            filters.append((entity_type, col, val)) 
+        selects = []
+        for ret in self._return_requests: 
+            if entity_alias == ret.split('.')[0]: 
+                if '.' in ret: 
+                    ent , col = ret.split('.')
+                    _ignored, field = get_field(self.schema, entity_type, col)
+                    selects.append(field)
+                else: 
+                    selects += get_all_fields(self.schema, entity_type)
+            # TODO: hack, always include the join fields of this entity. 
+            selects += get_all_join_fields(self.schema, entity_type)
 
+        return {
+            ENTITY: entity, 
+            ALIASES: [entity_alias], 
+            TABLE: table, 
+            FILTERS: filters, 
+            SELECTS: selects, 
+        }
+    
+    def _merge_sources(self, sources): 
+        return {
+            **sources[0], 
+            ALIASES: list(tz.concat([src[ALIASES] for src in sources])),
+            FILTERS: list(tz.concat([src[FILTERS] for src in sources])),
+            SELECTS:  list(tz.concat([src[SELECTS] for src in sources])),
+        }
+    
+    def _to_sql_source(self, source):
+        alias = source[ALIASES][0]
+        
+        if not  source[FILTERS]: 
+            q = source[TABLE]
+        else: 
+            q =  Query.from_(source[TABLE]).select(*source[SELECTS])
+            for entity_type, col, val in source[FILTERS]:
+                _ignored, field = get_field(self.schema, entity_type, col)
+                q = q.where(Field(field, table = source[TABLE]) == val)
+            
+        q = q.as_(alias)
+        return q 
+        
+    def sql(self): 
+        raw_sources = [ self._get_entity_source(entity) for entity in self.entities]
+        split_sources = [[raw_sources[0]]]
+        for source in raw_sources[1:]:
+            if all(source[TABLE] == src[TABLE] and source[ENTITY][TYPE] != src[ENTITY][TYPE] for src in split_sources[-1]):
+                # backed by the same table, but represents different entities, this case, we don't have to do any special joins. 
+                split_sources[-1].append(source)
+            else : 
+                split_sources.append([source])
+        sources = [self._merge_sources(split) for split in split_sources]
+        sources = [{**src, SOURCE: self._to_sql_source(src)} for src in sources]
+
+        q = Query.from_(sources[0][SOURCE])
+        for i in range(1, len(sources)):
+            source = sources[i] 
+            prev_source = sources[i-1]
+            field_a, field_b = find_join_fields(self.schema, prev_source[ENTITY][TYPE], source[ENTITY][TYPE])
+            q = q.join(source[SOURCE]).on_field(field_a, field_b)
+            
+        select_terms = []
+        for source in sources:
+            select_terms +=  [Field(field, table=source[SOURCE]) for field in  source[SELECTS]]
+        q = q.select(*select_terms)
+        print(str(q))
         return str(q)
         
     
@@ -530,7 +592,11 @@ class _GrandCypherTransformer(Transformer):
                 node_type = token.value
         cname = cname or Token("CNAME", shortuuid())
         json_data = json_data or {}
-
+        self.entities.append({
+            NAME: cname, 
+            TYPE: node_type,
+            FILTERS: json_data
+        })
         return (cname, node_type, json_data)
 
     def match_clause(self, match_clause: Tuple):
@@ -538,11 +604,6 @@ class _GrandCypherTransformer(Transformer):
             # This is just a node match:
             u, ut, js = match_clause[0]
             self._motif.add_node(u.value, __labels__ = ut, **js)
-            self.entities.append({
-                NAME: u, 
-                TYPE: ut, 
-                FILTERS: js
-            })
             return
         for start in range(0, len(match_clause) - 2, 2):
             ((u, ut, ujs), (g, t, d, minh, maxh), (v, vt, vjs)) = match_clause[start : start + 3]
@@ -570,16 +631,10 @@ class _GrandCypherTransformer(Transformer):
             
             self._motif.add_node(u, __labels__=ut, **ujs)
             self._motif.add_node(v, __labels__=vt, **vjs)
-            self.entities.append({
-                NAME: u, 
-                TYPE: ut, 
-                FILTERS: ujs
-            })
-            self.entities.append({
-                NAME: v, 
-                TYPE: vt, 
-                FILTERS: vjs })
+
             self.links.append({
+                'a':ut, 
+                'b': vt, 
                 "name": g, 
                 "type": t, 
                 "direction": d

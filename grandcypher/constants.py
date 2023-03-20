@@ -1,9 +1,19 @@
+# all constants used in this project
 FILTERS = 'filters'
 NAME = 'name'
 TYPE = 'type'
-
+ENTITY = 'entity'
+TABLE = 'table'
 MODELS= 'models'
-SOURCES = 'sources'
-SOURCE = 'source'
+TABLES = 'tables'
+TABLE = 'table'
+SOURCE= 'source'
 COLUMNS='columns'
+FIELD = 'field'
 PATH = 'path'
+ALIASES = 'aliases'
+SELECTS = 'selects'
+
+LINKS = 'links'
+A = 'a'
+B = 'b'
