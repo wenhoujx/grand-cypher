@@ -15,6 +15,3 @@ PATH = 'path'
 ALIASES = 'aliases'
 SELECTS = 'selects'
 
-LINKS = 'links'
-A = 'a'
-B = 'b'

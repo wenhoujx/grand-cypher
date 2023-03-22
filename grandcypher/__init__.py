@@ -6,13 +6,9 @@ data/attribute or by structure, using the same language you'd use
 to search in a much larger graph database.
 
 """
-from dataclasses import field
-from distutils.command.build_scripts import first_line_re
-from sys import getfilesystemencoding
-from time import thread_time
 import toolz as tz
 from typing import Dict, List, Callable, Tuple
-from pypika import Query, Table, Field, JoinType
+from pypika import Query, Table, Field
 import random
 import string
 from functools import lru_cache
@@ -22,8 +18,8 @@ import grandiso
 
 from lark import Lark, Transformer, v_args, Token
 
-from grandcypher.constants import A, ALIASES, ENTITY, ENTITY_TYPES, FILTERS, NAME, SELECTS, SOURCE, TABLE, TABLE, TYPE
-from grandcypher.schema import find_join_fields, get_all_fields, get_all_join_fields, get_field, get_field_by_table_and_col, table_name
+from grandcypher.constants import ALIASES, ENTITY, ENTITY_TYPES, FILTERS, NAME, SELECTS, SOURCE, TABLE, TABLE, TYPE
+from grandcypher.schema import find_join_fields, get_all_fields, primary_field, get_field, table_name
 
 
 _OPERATORS = {
@@ -383,7 +379,7 @@ class _GrandCypherTransformer(Transformer):
                 else: 
                     selects += get_all_fields(self.schema, entity_type)
             # TODO: hack, always include the join fields of this entity. 
-            selects += get_all_join_fields(self.schema, entity_type)
+        selects.append( primary_field(self.schema, entity_type))
 
         return {
             ENTITY: entity, 
@@ -398,9 +394,9 @@ class _GrandCypherTransformer(Transformer):
         return {
             **sources[0], 
             ENTITY_TYPES:  list(tz.concat([src[ENTITY_TYPES]  for src in sources])),
-            ALIASES: list(tz.concat([src[ALIASES] for src in sources])),
+            ALIASES: list(set(tz.concat([src[ALIASES] for src in sources]))),
             FILTERS: list(tz.concat([src[FILTERS] for src in sources])),
-            SELECTS:  list(tz.concat([src[SELECTS] for src in sources])),
+            SELECTS:  list(set(tz.concat([src[SELECTS] for src in sources]))),
         }
     
     def _to_sql_source(self, source):
@@ -433,14 +429,14 @@ class _GrandCypherTransformer(Transformer):
         for i in range(1, len(sources)):
             source = sources[i] 
             prev_source = sources[i-1]
-            field_a, field_b = find_join_fields(self.schema, prev_source[ENTITY_TYPES][-1], source[ENTITY_TYPES][0])
-            q = q.join(source[SOURCE]).on_field(field_a, field_b)
+            field_a, field_b = find_join_fields(self.schema, prev_source[ENTITY_TYPES], source[ENTITY_TYPES])
+            q = q.join(source[SOURCE]).on(Field(field_a, table=prev_source[SOURCE]) == Field(field_b, table=source[SOURCE]))
             
         select_terms = []
         for source in sources:
             select_terms +=  [Field(field, table=source[SOURCE]) for field in  source[SELECTS]]
         q = q.select(*select_terms)
-        print(str(q))
+        print(q)
         return str(q)
         
     

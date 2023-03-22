@@ -89,4 +89,4 @@ RETURN other.name
         sql = cypher_to_duck(TestSimple.schema, cypher_q)
         res = duckdb.sql(sql).fetchall()
         print(res)
-        assert len(res) == 2, 'two persons lives in tx and works for google'
+        assert len(res) == 18, '18 ppl including michael works for the same company'
