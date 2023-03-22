@@ -60,9 +60,14 @@ def get_all_fields(schema, entity_type):
         return [col.get(FIELD) or col[NAME] for col in mod[COLUMNS]]
     
 
-def find_join_fields(schema, entity_type_a, entity_type_b): 
-    if entity_type_a == entity_type_b: 
-        raise ValueError("should not be the same")
+def find_join_fields(schema, left_entity_types, right_entity_types): 
+    if not left_entity_types: 
+        raise ValueError("left_entity_types is empty")
+    if not right_entity_types:
+        raise ValueError("right_entity_types is empty")
+    if len(left_entity_types) == 1 and len(right_entity_types) == 1 and left_entity_types[0] == right_entity_types[0]:
+        raise ValueError(f"should not be the same, left: {left_entity_types}, right: {right_entity_types}")
+    # entity_types are grouped together only b/c they are from the same source table.
     for link in schema[LINKS]: 
         if (entity_type_a, entity_type_b) == (_split_then_first(link[A]), _split_then_first(link[B])): 
             return (get_field(schema, *link[A].split('.'))[1], get_field(schema, *link[B].split('.'))[1])

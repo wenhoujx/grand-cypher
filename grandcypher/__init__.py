@@ -22,7 +22,7 @@ import grandiso
 
 from lark import Lark, Transformer, v_args, Token
 
-from grandcypher.constants import A, ALIASES, ENTITY, FILTERS, NAME, SELECTS, SOURCE, TABLE, TABLE, TYPE
+from grandcypher.constants import A, ALIASES, ENTITY, ENTITY_TYPES, FILTERS, NAME, SELECTS, SOURCE, TABLE, TABLE, TYPE
 from grandcypher.schema import find_join_fields, get_all_fields, get_all_join_fields, get_field, get_field_by_table_and_col, table_name
 
 
@@ -387,6 +387,7 @@ class _GrandCypherTransformer(Transformer):
 
         return {
             ENTITY: entity, 
+            ENTITY_TYPES:  [entity_type],
             ALIASES: [entity_alias], 
             TABLE: table, 
             FILTERS: filters, 
@@ -396,6 +397,7 @@ class _GrandCypherTransformer(Transformer):
     def _merge_sources(self, sources): 
         return {
             **sources[0], 
+            ENTITY_TYPES:  list(tz.concat([src[ENTITY_TYPES]  for src in sources])),
             ALIASES: list(tz.concat([src[ALIASES] for src in sources])),
             FILTERS: list(tz.concat([src[FILTERS] for src in sources])),
             SELECTS:  list(tz.concat([src[SELECTS] for src in sources])),
@@ -431,7 +433,7 @@ class _GrandCypherTransformer(Transformer):
         for i in range(1, len(sources)):
             source = sources[i] 
             prev_source = sources[i-1]
-            field_a, field_b = find_join_fields(self.schema, prev_source[ENTITY][TYPE], source[ENTITY][TYPE])
+            field_a, field_b = find_join_fields(self.schema, prev_source[ENTITY_TYPES][-1], source[ENTITY_TYPES][0])
             q = q.join(source[SOURCE]).on_field(field_a, field_b)
             
         select_terms = []

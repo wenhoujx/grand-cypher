@@ -1,5 +1,5 @@
 version: 1 
-
+# schema
 tables: 
   - name: raw_customers
     type: csv 
@@ -13,6 +13,7 @@ models:
     columns: 
     - name: id
       type: string 
+      primary: true
     - name: first_name 
       type: string 
     - name: last_name 
@@ -22,19 +23,15 @@ models:
     columns:
     - name: company
       type: string 
+      primary: true 
   - name: CustomerInfo
     table: customer_infos
     columns:
     - name: id
       type: string       
+      primary: true
     - name: age
       type: integer
     - name: state
       type: string
-links: 
-  - a: Customer.id 
-    b: CustomerInfo.id
-    
-     
 
-    

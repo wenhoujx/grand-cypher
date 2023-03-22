@@ -69,13 +69,22 @@ RETURN other.name
         RETURN ci
         """
         sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = duckdb.sql(sql).fetchall() 
         assert len(res) == 12
 
     def test_filter_join_table(self): 
         # find the person who lives in TX, works for google.
         cypher_q = """MATCH (ci:CustomerInfo{state: "TX"}) -- (cu: Customer) -- (co: Company {company:"google"})
         RETURN ci, cu, co
+        """
+        sql = cypher_to_duck(TestSimple.schema, cypher_q)
+        res = duckdb.sql(sql).fetchall()
+        print(res)
+        assert len(res) == 2, 'two persons lives in tx and works for google'
+
+    def test_self_join_filter(self): 
+        cypher_q = """MATCH (michael:Customer {first_name: "michael"}) -- (company: Company) -- (person: Customer)
+        RETURN person
         """
         sql = cypher_to_duck(TestSimple.schema, cypher_q)
         res = duckdb.sql(sql).fetchall()
