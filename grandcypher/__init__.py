@@ -476,24 +476,26 @@ class _GrandCypherTransformer(Transformer):
             SELECTS: list(tz.concat([src[SELECTS] for src in sources])),
         }
 
-    def _later_sql_source(self, source, include_primary_fields=False):
+    def _later_sql_source(self, source, joins=False):
         alias = source[ALIASES][0]
 
         if not source[FILTERS]:
             q = source[TABLE].as_(alias)
         else:
             # if filters present, we need to use a subquery with select, where, ...
-            q = Query.from_(source[TABLE])
+            # TODO pretty weird that the inner and out share the same alias.
+            table = source[TABLE].as_(alias)
+            q = Query.from_(table)
             for entity_type, col, val in source[FILTERS]:
                 _ignored, field = get_field(self.schema, entity_type, col)
-                q = q.where(Field(field, table=source[TABLE]) == val)
+                q = q.where(Field(field, table=table) == val)
             q = q.as_(alias)
             # if filters, we need to select the fields we want to return
             select_terms = self._compute_fields(q, source[SELECTS])
-            if include_primary_fields:
+            if joins: 
                 # include join field which is the primary field.
                 select_terms += [
-                    self.get_primary_field(entity_type, q)
+                    self.get_primary_field(entity_type, table)
                     for entity_type in source[ENTITY_TYPES]
                 ]
             q = q.select(*select_terms)
@@ -502,12 +504,16 @@ class _GrandCypherTransformer(Transformer):
     def _first_sql_source(self, source):
         alias = source[ALIASES][0]
         # first source is special.
-
-        q = source[TABLE].as_(alias)
+        table = source[TABLE].as_(alias)
+        #TODO this is pretty horrible. 
+        source.update({
+            TABLE: table,
+        })
+        q = Query.from_(table)
         if source[FILTERS]:
             for entity_type, col, val in source[FILTERS]:
                 _ignored, field = get_field(self.schema, entity_type, col)
-                q = q.where(Field(field, table=source[TABLE]) == val)
+                q = q.where(Field(field, table=table) == val)
         return q
 
     def get_primary_field(self, entity_type, table):
@@ -531,6 +537,7 @@ class _GrandCypherTransformer(Transformer):
     def sql(self):
         raw_sources = [self._get_entity_source(entity) for entity in self.entities]
         split_sources = [[raw_sources[0]]]
+        # try merge adjacent sources backed by the same table.
         for source in raw_sources[1:]:
             if all(
                 source[TABLE] == src[TABLE]
@@ -548,21 +555,15 @@ class _GrandCypherTransformer(Transformer):
                     SOURCE: self._first_sql_source(source)
                     if i == 0
                     else self._later_sql_source(
-                        source, include_primary_fields=len(sources) > 1
+                        source, joins=True
                     )
                 }
             )
 
         q = sources[0][SOURCE]
         select_terms = []
-        for source in sources:
-            select_terms += self._compute_fields(source[SOURCE], source[SELECTS])
-        if len(sources) > 1:
-            # need to put join field in select clause
-            select_terms += [
-                self.get_primary_field(entity_type, sources[0][SOURCE])
-                for entity_type in sources[0][ENTITY_TYPES]
-            ]
+        for i ,  source in enumerate(sources):
+            select_terms += self._compute_fields(source[TABLE] if i == 0 else source[SOURCE], source[SELECTS])
 
         q = q.select(*select_terms)
 
@@ -573,7 +574,8 @@ class _GrandCypherTransformer(Transformer):
                 self.schema, prev_source[ENTITY_TYPES], source[ENTITY_TYPES]
             )
             q = q.join(source[SOURCE]).on(
-                Field(field_a, table=(prev_source[SOURCE]))
+                # join on the outer table if prev is the first source, otherwise join on the prev source.
+                Field(field_a, table=(prev_source[TABLE] if i == 1 else prev_source[SOURCE]))
                 == Field(field_b, table=source[SOURCE])
             )
 

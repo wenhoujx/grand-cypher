@@ -108,4 +108,5 @@ RETURN other.name
         sql = cypher_to_duck(TestSimple.schema, cypher_q)
         res = duckdb.sql(sql).fetchall()
         print(res)
-        assert len(res) == 18, '18 ppl including michael works for the same company'
+        assert len(res) == 1 , 'single row'
+        assert res[0][0] == 18, 'single value == 18'
