@@ -1,4 +1,5 @@
 # all constants used in this project
+OP = 'op'
 FILTERS = 'filters'
 NAME = 'name'
 TYPE = 'type'
@@ -9,9 +10,9 @@ MODELS= 'models'
 TABLES = 'tables'
 TABLE = 'table'
 SOURCE= 'source'
+COLUMN = 'column'
 COLUMNS='columns'
 FIELD = 'field'
 PATH = 'path'
 ALIASES = 'aliases'
 SELECTS = 'selects'
-

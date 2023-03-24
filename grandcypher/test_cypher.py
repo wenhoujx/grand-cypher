@@ -90,3 +90,22 @@ RETURN other.name
         res = duckdb.sql(sql).fetchall()
         print(res)
         assert len(res) == 18, '18 ppl including michael works for the same company'
+
+    def test_self_join_filter_no_michael(self): 
+        cypher_q = """MATCH (michael:Customer {first_name: "michael"}) -- (company: Company) -- (person: Customer)
+
+        RETURN person
+        """
+        sql = cypher_to_duck(TestSimple.schema, cypher_q)
+        res = duckdb.sql(sql).fetchall()
+        print(res)
+        assert len(res) == 18, '18 ppl including michael works for the same company'
+
+    def test_count(self): 
+        cypher_q = """MATCH (company:Company {company: "google"}) -- (customer: Customer)
+        RETURN count(customer)
+        """
+        sql = cypher_to_duck(TestSimple.schema, cypher_q)
+        res = duckdb.sql(sql).fetchall()
+        print(res)
+        assert len(res) == 18, '18 ppl including michael works for the same company'

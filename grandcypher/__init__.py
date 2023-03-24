@@ -6,9 +6,12 @@ data/attribute or by structure, using the same language you'd use
 to search in a much larger graph database.
 
 """
+from asyncio import selector_events
+from distutils.command.build_scripts import first_line_re
 import toolz as tz
 from typing import Dict, List, Callable, Tuple
-from pypika import Query, Table, Field
+from pypika import Query, Table, Field, functions as fn
+
 import random
 import string
 from functools import lru_cache
@@ -18,8 +21,29 @@ import grandiso
 
 from lark import Lark, Transformer, v_args, Token
 
-from grandcypher.constants import ALIASES, ENTITY, ENTITY_TYPES, FILTERS, NAME, SELECTS, SOURCE, TABLE, TABLE, TYPE
-from grandcypher.schema import find_join_fields, get_all_fields, primary_field, get_field, table_name
+from grandcypher.constants import (
+    ALIASES,
+    COLUMN,
+    COLUMNS,
+    ENTITY,
+    ENTITY_TYPES,
+    FIELD,
+    FILTERS,
+    NAME,
+    OP,
+    SELECTS,
+    SOURCE,
+    TABLE,
+    TABLE,
+    TYPE,
+)
+from grandcypher.schema import (
+    find_join_fields,
+    get_all_fields,
+    primary_field,
+    get_field,
+    table_name,
+)
 
 
 _OPERATORS = {
@@ -73,11 +97,14 @@ op                  : "==" -> op_eq
                     | "<="-> op_lte
                     | "is"i -> op_is
 
-
-return_clause       : "return"i entity_id ("," entity_id)*
-                    | "return"i entity_id ("," entity_id)* limit_clause
-                    | "return"i entity_id ("," entity_id)* skip_clause
-                    | "return"i entity_id ("," entity_id)* skip_clause limit_clause
+return_clause       : "return"i (aggregate | entity_id) ("," (aggregate | entity_id))* limit_clause? skip_clause?
+aggregate           : count_aggregate |count_star | sum_aggregate | avg_aggregate | min_aggregate | max_aggregate
+count_star          : "count"i "(" "*" ")"
+count_aggregate     : "count"i "(" entity_id ")"
+sum_aggregate       : "sum"i "(" entity_id ")"
+avg_aggregate       : "avg"i "(" entity_id ")"
+min_aggregate       : "min"i "(" entity_id ")"
+max_aggregate       : "max"i "(" entity_id ")"
 
 limit_clause        : "limit"i NUMBER
 skip_clause         : "skip"i NUMBER
@@ -168,7 +195,7 @@ def _is_node_attr_match(
     host_node = host.nodes[host_node_id]
 
     for attr, val in motif_node.items():
-        if attr == '__labels__':
+        if attr == "__labels__":
             if val and val - host_node.get("__labels__", set()):
                 return False
             continue
@@ -203,7 +230,7 @@ def _is_edge_attr_match(
     host_edge = host.edges[host_edge_id]
 
     for attr, val in motif_edge.items():
-        if attr == '__labels__':
+        if attr == "__labels__":
             if val and val - host_edge.get("__labels__", set()):
                 return False
             continue
@@ -227,9 +254,7 @@ def _get_entity_from_host(host: nx.DiGraph, entity_name, entity_attribute=None):
         # looking for an edge:
         edge_data = host.get_edge_data(*entity_name)
         if not edge_data:
-            return (
-                None  # print(f"Nothing found for {entity_name} {entity_attribute}")
-            )
+            return None  # print(f"Nothing found for {entity_name} {entity_attribute}")
         if entity_attribute:
             # looking for edge attribute:
             return edge_data.get(entity_attribute, None)
@@ -239,8 +264,10 @@ def _get_entity_from_host(host: nx.DiGraph, entity_name, entity_attribute=None):
 
 def _get_edge(host: nx.DiGraph, mapping, match_path, u, v):
     edge_path = match_path[(u, v)]
-    return [host.get_edge_data(mapping[u], mapping[v])
-            for u, v in zip(edge_path[:-1], edge_path[1:])]
+    return [
+        host.get_edge_data(mapping[u], mapping[v])
+        for u, v in zip(edge_path[:-1], edge_path[1:])
+    ]
 
 
 CONDITION = Callable[[dict, nx.DiGraph, list], bool]
@@ -249,12 +276,16 @@ CONDITION = Callable[[dict, nx.DiGraph, list], bool]
 def and_(cond_a, cond_b) -> CONDITION:
     def inner(match: dict, host: nx.DiGraph, return_endges: list) -> bool:
         return cond_a(match, host, return_endges) and cond_b(match, host, return_endges)
+
     return inner
+
 
 def or_(cond_a, cond_b):
     def inner(match: dict, host: nx.DiGraph, return_endges: list) -> bool:
         return cond_a(match, host, return_endges) or cond_b(match, host, return_endges)
+
     return inner
+
 
 def cond_(should_be, entity_id, operator, value) -> CONDITION:
     def inner(match: dict, host: nx.DiGraph, return_endges: list) -> bool:
@@ -274,6 +305,7 @@ def cond_(should_be, entity_id, operator, value) -> CONDITION:
         if val != should_be:
             return False
         return True
+
     return inner
 
 
@@ -286,7 +318,7 @@ _BOOL_ARI = {
 class _GrandCypherTransformer(Transformer):
     def __init__(self, schema):
         self._target_graph = None
-        self.schema =schema
+        self.schema = schema
         self._where_condition: CONDITION = None
         self._motif = nx.DiGraph()
         self._matches = None
@@ -297,7 +329,7 @@ class _GrandCypherTransformer(Transformer):
         self._skip = 0
         self._max_hop = 100
         self.entities = []
-        self.links= []
+        self.links = []
 
     def _lookup(self, data_path):
         if not isinstance(data_path, str):
@@ -317,7 +349,10 @@ class _GrandCypherTransformer(Transformer):
             if entity_attribute:
                 # Get the correct entity from the target host graph,
                 # and then return the attribute:
-                ret = (self._target_graph.nodes[node].get(entity_attribute, None) for node in ret)
+                ret = (
+                    self._target_graph.nodes[node].get(entity_attribute, None)
+                    for node in ret
+                )
 
             return list(ret)
         else:
@@ -325,11 +360,15 @@ class _GrandCypherTransformer(Transformer):
                 mapping_u, mapping_v = self._return_edges[data_path]
                 # We are looking for an edge mapping in the target graph:
                 is_hop = self._motif.edges[(mapping_u, mapping_v)]["__is_hop__"]
-                ret = (_get_edge(self._target_graph, mapping, match_path,mapping_u, mapping_v)
-                       for mapping, match_path in self._get_true_matches())
+                ret = (
+                    _get_edge(
+                        self._target_graph, mapping, match_path, mapping_u, mapping_v
+                    )
+                    for mapping, match_path in self._get_true_matches()
+                )
                 ret = (r[0] if is_hop else r for r in ret)
                 # we keep the original list if len > 2 (edge hop 2+)
-                
+
                 if entity_attribute:
                     # Get the correct entity from the target host graph,
                     # and then return the attribute:
@@ -339,12 +378,50 @@ class _GrandCypherTransformer(Transformer):
 
             raise NotImplementedError(f"Unknown entity name: {data_path}")
 
+    def count_star(self, count):
+        return {
+            OP: "count",
+        }
+
+    def count_aggregate(self, count):
+        return {
+            OP: "count",
+            COLUMN: count[0].value,
+        }
+
+    def sum_aggregate(self, sum):
+        return {
+            OP: "sum",
+            COLUMN: sum[0].value,
+        }
+
+    def avg_aggregate(self, avg):
+        return {
+            OP: "avg",
+            COLUMN: avg[0].value,
+        }
+
+    def min_aggregate(self, min):
+        return {
+            OP: "min",
+            COLUMN: min[0].value,
+        }
+
+    def max_aggregate(self, max):
+        return {
+            OP: "max",
+            COLUMN: max[0].value,
+        }
+
+    def aggregate(self, clause):
+        return clause[0]
+
     def return_clause(self, clause):
         for item in clause:
-            if item:
-                if not isinstance(item, str):
-                    item = str(item.value)
+            if isinstance(item, dict):
                 self._return_requests.append(item)
+            else:
+                self._return_requests.append({COLUMN: item})
 
     def limit_clause(self, limit):
         limit = int(limit[-1])
@@ -361,92 +438,168 @@ class _GrandCypherTransformer(Transformer):
                 for r in self._return_requests
             }
         return {r: self._lookup(r)[self._skip :] for r in self._return_requests}
-    
-    def _get_entity_source(self, entity): 
-        entity_type = entity[TYPE] 
+
+    def _get_entity_source(self, entity):
+        entity_type = entity[TYPE]
         entity_alias = entity[NAME]
         table = Table(table_name(self.schema, entity_type))
         filters = []
         for col, val in entity[FILTERS].items():
-            filters.append((entity_type, col, val)) 
+            filters.append((entity_type, col, val))
         selects = []
-        for ret in self._return_requests: 
-            if entity_alias == ret.split('.')[0]: 
-                if '.' in ret: 
-                    ent , col = ret.split('.')
+        for ret in self._return_requests:
+            column = ret[COLUMN]
+            op = ret.get(OP, None)
+            if entity_alias == column.split(".")[0]:
+                if "." in column:
+                    ent, col = column.split(".")
                     _ignored, field = get_field(self.schema, entity_type, col)
-                    selects.append(field)
-                else: 
-                    selects += get_all_fields(self.schema, entity_type)
-            # TODO: hack, always include the join fields of this entity. 
-        selects.append( primary_field(self.schema, entity_type))
+                    selects.append({**ret, FIELD: field})
+                else:
+                    selects.append({**ret, FIELD: "*"})
 
         return {
-            ENTITY: entity, 
-            ENTITY_TYPES:  [entity_type],
-            ALIASES: [entity_alias], 
-            TABLE: table, 
-            FILTERS: filters, 
-            SELECTS: selects, 
+            ENTITY: entity,
+            ENTITY_TYPES: [entity_type],
+            ALIASES: [entity_alias],
+            TABLE: table,
+            FILTERS: filters,
+            SELECTS: selects,
         }
-    
-    def _merge_sources(self, sources): 
+
+    def _merge_sources(self, sources):
         return {
-            **sources[0], 
-            ENTITY_TYPES:  list(tz.concat([src[ENTITY_TYPES]  for src in sources])),
+            **sources[0],
+            ENTITY_TYPES: list(tz.concat([src[ENTITY_TYPES] for src in sources])),
             ALIASES: list(set(tz.concat([src[ALIASES] for src in sources]))),
             FILTERS: list(tz.concat([src[FILTERS] for src in sources])),
-            SELECTS:  list(set(tz.concat([src[SELECTS] for src in sources]))),
+            SELECTS: list(tz.concat([src[SELECTS] for src in sources])),
         }
-    
-    def _to_sql_source(self, source):
+
+    def _later_sql_source(self, source, include_primary_fields=False):
         alias = source[ALIASES][0]
-        
-        if not  source[FILTERS]: 
-            q = source[TABLE]
-        else: 
-            q =  Query.from_(source[TABLE]).select(*source[SELECTS])
+
+        if not source[FILTERS]:
+            q = source[TABLE].as_(alias)
+        else:
+            # if filters present, we need to use a subquery with select, where, ...
+            q = Query.from_(source[TABLE])
             for entity_type, col, val in source[FILTERS]:
                 _ignored, field = get_field(self.schema, entity_type, col)
-                q = q.where(Field(field, table = source[TABLE]) == val)
-            
-        q = q.as_(alias)
-        return q 
-        
-    def sql(self): 
-        raw_sources = [ self._get_entity_source(entity) for entity in self.entities]
+                q = q.where(Field(field, table=source[TABLE]) == val)
+            q = q.as_(alias)
+            # if filters, we need to select the fields we want to return
+            select_terms = self._compute_fields(q, source[SELECTS])
+            if include_primary_fields:
+                # include join field which is the primary field.
+                select_terms += [
+                    self.get_primary_field(entity_type, q)
+                    for entity_type in source[ENTITY_TYPES]
+                ]
+            q = q.select(*select_terms)
+        return q
+
+    def _first_sql_source(self, source):
+        alias = source[ALIASES][0]
+        # first source is special.
+
+        q = source[TABLE].as_(alias)
+        if source[FILTERS]:
+            for entity_type, col, val in source[FILTERS]:
+                _ignored, field = get_field(self.schema, entity_type, col)
+                q = q.where(Field(field, table=source[TABLE]) == val)
+        return q
+
+    def get_primary_field(self, entity_type, table):
+        id_field = primary_field(self.schema, entity_type)
+        return Field(id_field, table=table)
+
+    def _compute_fields(self, source, selects):
+        select_terms = []
+        for select in selects:
+            op = select.get(OP, None)
+            if op == "count" and select[FIELD] == "*":
+                select_terms.append(fn.Count("*"))
+            elif select[FIELD] == "*":
+                select_terms.append(self._sql_op(op, source.star))
+            else:
+                select_terms.append(
+                    self._sql_op(op, Field(select[FIELD], table=source))
+                )
+        return select_terms
+
+    def sql(self):
+        raw_sources = [self._get_entity_source(entity) for entity in self.entities]
         split_sources = [[raw_sources[0]]]
         for source in raw_sources[1:]:
-            if all(source[TABLE] == src[TABLE] and source[ENTITY][TYPE] != src[ENTITY][TYPE] for src in split_sources[-1]):
-                # backed by the same table, but represents different entities, this case, we don't have to do any special joins. 
+            if all(
+                source[TABLE] == src[TABLE]
+                and source[ENTITY][TYPE] != src[ENTITY][TYPE]
+                for src in split_sources[-1]
+            ):
+                # backed by the same table, but represents different entities, this case, we don't have to do any special joins.
                 split_sources[-1].append(source)
-            else : 
+            else:
                 split_sources.append([source])
         sources = [self._merge_sources(split) for split in split_sources]
-        sources = [{**src, SOURCE: self._to_sql_source(src)} for src in sources]
+        for i, source in enumerate(sources):
+            source.update(
+                {
+                    SOURCE: self._first_sql_source(source)
+                    if i == 0
+                    else self._later_sql_source(
+                        source, include_primary_fields=len(sources) > 1
+                    )
+                }
+            )
 
-        q = Query.from_(sources[0][SOURCE])
-        for i in range(1, len(sources)):
-            source = sources[i] 
-            prev_source = sources[i-1]
-            field_a, field_b = find_join_fields(self.schema, prev_source[ENTITY_TYPES], source[ENTITY_TYPES])
-            q = q.join(source[SOURCE]).on(Field(field_a, table=prev_source[SOURCE]) == Field(field_b, table=source[SOURCE]))
-            
+        q = sources[0][SOURCE]
         select_terms = []
         for source in sources:
-            select_terms +=  [Field(field, table=source[SOURCE]) for field in  source[SELECTS]]
+            select_terms += self._compute_fields(source[SOURCE], source[SELECTS])
+        if len(sources) > 1:
+            # need to put join field in select clause
+            select_terms += [
+                self.get_primary_field(entity_type, sources[0][SOURCE])
+                for entity_type in sources[0][ENTITY_TYPES]
+            ]
+
         q = q.select(*select_terms)
+
+        for i in range(1, len(sources)):
+            source = sources[i]
+            prev_source = sources[i - 1]
+            field_a, field_b = find_join_fields(
+                self.schema, prev_source[ENTITY_TYPES], source[ENTITY_TYPES]
+            )
+            q = q.join(source[SOURCE]).on(
+                Field(field_a, table=(prev_source[SOURCE]))
+                == Field(field_b, table=source[SOURCE])
+            )
+
         print(q)
         return str(q)
-        
-    
+
+    def _sql_op(self, op, field):
+        if op:
+            return {
+                "sum": fn.Sum,
+                "count": fn.Count,
+                "avg": fn.Avg,
+                "min": fn.Min,
+                "max": fn.Max,
+            }[op](field)
+        else:
+            return field
+
     def _get_true_matches(self):
         # filter the matches based upon the conditions of the where clause:
         # TODO: promote these to inside the monomorphism search
         actual_matches = []
         for match, match_path in self._get_structural_matches():
-            if (not self._where_condition or
-                self._where_condition(match, self._target_graph, self._return_edges)):
+            if not self._where_condition or self._where_condition(
+                match, self._target_graph, self._return_edges
+            ):
                 actual_matches.append((match, match_path))
         return actual_matches
 
@@ -467,24 +620,28 @@ class _GrandCypherTransformer(Transformer):
                         if (self._skip and self._limit)
                         else None,
                         is_node_attr_match=_is_node_attr_match,
-                        is_edge_attr_match=_is_edge_attr_match
+                        is_edge_attr_match=_is_edge_attr_match,
                     )
                     if not matches:
                         matches = _matches
                     elif _matches:
                         matches = [{**a, **b} for a in matches for b in _matches]
-                zero_hop_edges = [k for k, v in edge_hop_map.items() if len(v) == 2 and v[0] == v[1]]
+                zero_hop_edges = [
+                    k for k, v in edge_hop_map.items() if len(v) == 2 and v[0] == v[1]
+                ]
                 for match in matches:
                     # matches can contains zero hop edges from A to B
                     # there are 2 cases to take care
                     # (1) there are both A and B in the match. This case is the result of query A -[*0]-> B --> C.
                     #   If A != B break else continue to (2)
-                    # (2) there is only A in the match. This case is the result of query A -[*0]-> B. 
+                    # (2) there is only A in the match. This case is the result of query A -[*0]-> B.
                     #   If A is qualified to be B (node attr match), set B = A else break
                     for a, b in zero_hop_edges:
                         if b in match and match[b] != match[a]:
                             break
-                        if not _is_node_attr_match(b, match[a], self._motif, self._target_graph):
+                        if not _is_node_attr_match(
+                            b, match[a], self._motif, self._target_graph
+                        ):
                             break
                         match[b] = match[a]
                     else:
@@ -493,7 +650,7 @@ class _GrandCypherTransformer(Transformer):
             self._matches = self_matches
             self._matche_paths = self_matche_paths
         return list(zip(self._matches, self._matche_paths))
-    
+
     def _edge_hop_motifs(self, motif: nx.DiGraph) -> List[Tuple[nx.Graph, dict]]:
         """generate a list of edge-hop-expanded motif with edge-hop-map.
         
@@ -527,7 +684,9 @@ class _GrandCypherTransformer(Transformer):
             for _ in range(max(min_hop, 1), max_hop):
                 new_edges = [u] + hops + [v]
                 new_motif = nx.DiGraph()
-                new_motif.add_edges_from(list(zip(new_edges[:-1], new_edges[1:])), __labels__ = edge_type)
+                new_motif.add_edges_from(
+                    list(zip(new_edges[:-1], new_edges[1:])), __labels__=edge_type
+                )
                 new_motif.add_node(u, **motif.nodes[u])
                 new_motif.add_node(v, **motif.nodes[v])
                 new_motifs.append((new_motif, {(u, v): tuple(new_edges)}))
@@ -536,7 +695,10 @@ class _GrandCypherTransformer(Transformer):
         return motifs
 
     def _product_motifs(
-            self, motifs_1: List[Tuple[nx.DiGraph, dict]], motifs_2: List[Tuple[nx.DiGraph, dict]]):
+        self,
+        motifs_1: List[Tuple[nx.DiGraph, dict]],
+        motifs_2: List[Tuple[nx.DiGraph, dict]],
+    ):
         new_motifs = []
         for motif_1, mapping_1 in motifs_1:
             for motif_2, mapping_2 in motifs_2:
@@ -547,8 +709,7 @@ class _GrandCypherTransformer(Transformer):
                 motif.add_edges_from(motif_2.edges.data())
                 new_motifs.append((motif, {**mapping_1, **mapping_2}))
         return new_motifs
-        
-        
+
     def entity_id(self, entity_id):
         if len(entity_id) == 2:
             return ".".join(entity_id)
@@ -590,21 +751,19 @@ class _GrandCypherTransformer(Transformer):
                 node_type = token.value
         cname = cname or Token("CNAME", shortuuid())
         json_data = json_data or {}
-        self.entities.append({
-            NAME: cname, 
-            TYPE: node_type,
-            FILTERS: json_data
-        })
+        self.entities.append({NAME: cname, TYPE: node_type, FILTERS: json_data})
         return (cname, node_type, json_data)
 
     def match_clause(self, match_clause: Tuple):
         if len(match_clause) == 1:
             # This is just a node match:
             u, ut, js = match_clause[0]
-            self._motif.add_node(u.value, __labels__ = ut, **js)
+            self._motif.add_node(u.value, __labels__=ut, **js)
             return
         for start in range(0, len(match_clause) - 2, 2):
-            ((u, ut, ujs), (g, t, d, minh, maxh), (v, vt, vjs)) = match_clause[start : start + 3]
+            ((u, ut, ujs), (g, t, d, minh, maxh), (v, vt, vjs)) = match_clause[
+                start : start + 3
+            ]
             if d == "r":
                 edges = ((u.value, v.value),)
             elif d == "l":
@@ -613,10 +772,10 @@ class _GrandCypherTransformer(Transformer):
                 edges = ((u.value, v.value), (v.value, u.value))
             else:
                 raise ValueError(f"Not support direction d={d!r}")
-            
+
             if g:
                 self._return_edges[g.value] = edges[0]
-            
+
             ish = minh is None and maxh is None
             minh = minh if minh is not None else 1
             maxh = maxh if maxh is not None else minh + 1
@@ -625,23 +784,17 @@ class _GrandCypherTransformer(Transformer):
             if t:
                 t = set([t])
             self._motif.add_edges_from(
-                edges, __min_hop__ = minh, __max_hop__ = maxh, __is_hop__ = ish, __labels__ = t)
-            
+                edges, __min_hop__=minh, __max_hop__=maxh, __is_hop__=ish, __labels__=t
+            )
+
             self._motif.add_node(u, __labels__=ut, **ujs)
             self._motif.add_node(v, __labels__=vt, **vjs)
 
-            self.links.append({
-                'a':ut, 
-                'b': vt, 
-                "name": g, 
-                "type": t, 
-                "direction": d
-            })
+            self.links.append({"a": ut, "b": vt, "name": g, "type": t, "direction": d})
 
-            
     def where_clause(self, where_clause: tuple):
         self._where_condition = where_clause[0]
-    
+
     def compound_condition(self, val):
         if len(val) == 1:
             val = cond_(*val[0])
@@ -653,7 +806,6 @@ class _GrandCypherTransformer(Transformer):
     def where_and(self, val):
         return _BOOL_ARI["and"]
 
-    
     def where_or(self, val):
         return _BOOL_ARI["or"]
 
@@ -702,10 +854,11 @@ class _GrandCypherTransformer(Transformer):
         return (rule[0].value, rule[1])
 
 
-def cypher_to_duck(schema, cypher_query) : 
+def cypher_to_duck(schema, cypher_query):
     t = _GrandCypherTransformer(schema)
     t.transform(_GrandCypherGrammar.parse(cypher_query))
-    return  t.sql()
+    return t.sql()
+
 
 class GrandCypher:
     """
@@ -717,7 +870,6 @@ class GrandCypher:
     """
 
     def __init__(self, host_graph: nx.Graph) -> None:
-
         """
         Create a new GrandCypher object to query graphs with Cypher.
 

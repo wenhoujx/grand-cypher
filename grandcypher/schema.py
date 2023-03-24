@@ -16,6 +16,7 @@ def get_field(schema, entity, column):
                 continue 
             else : 
                 return (mod[TABLE], col.get(FIELD) or col[NAME])
+    raise ValueError(f"could not find field {column} in entity {entity}")
     
 def get_all_fields(schema, entity_type): 
     # returns all fields of an entity. 

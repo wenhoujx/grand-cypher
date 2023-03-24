@@ -3,10 +3,10 @@ version: 1
 tables: 
   - name: raw_customers
     type: csv 
-    path: ./testing/test1/raw_customers.csv
+    path: ./data/raw_customers.csv
   - name: customer_infos
     type: csv 
-    path: ./testing/test1/customer_infos.csv
+    path: ./data/customer_infos.csv
 models:
   - name: Customer
     table: raw_customers
@@ -34,4 +34,3 @@ models:
       type: integer
     - name: state
       type: string
-
