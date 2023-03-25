@@ -386,31 +386,31 @@ class _GrandCypherTransformer(Transformer):
     def count_aggregate(self, count):
         return {
             OP: "count",
-            COLUMN: count[0].value,
+            COLUMN: count[0],
         }
 
     def sum_aggregate(self, sum):
         return {
             OP: "sum",
-            COLUMN: sum[0].value,
+            COLUMN: sum[0], 
         }
 
     def avg_aggregate(self, avg):
         return {
             OP: "avg",
-            COLUMN: avg[0].value,
+            COLUMN: avg[0], 
         }
 
     def min_aggregate(self, min):
         return {
             OP: "min",
-            COLUMN: min[0].value,
+            COLUMN: min[0], 
         }
 
     def max_aggregate(self, max):
         return {
             OP: "max",
-            COLUMN: max[0].value,
+            COLUMN: max[0],
         }
 
     def aggregate(self, clause):

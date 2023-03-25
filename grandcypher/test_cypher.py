@@ -110,3 +110,20 @@ RETURN other.name
         print(res)
         assert len(res) == 1 , 'single row'
         assert res[0][0] == 18, 'single value == 18'
+
+    def test_max_age(self): 
+        cypher_q = """MATCH (customer: Customer) -- (customer_info: CustomerInfo)
+        RETURN max(customer_info.age)
+        """
+        sql = cypher_to_duck(TestSimple.schema, cypher_q)
+        res = duckdb.sql(sql).fetchall()
+        assert res[0][0] == 79, 'max age is 79'
+
+    def test_find_max_age_customer(self): 
+        cypher_q = """MATCH (customer: Customer) -- (customer_info: CustomerInfo)
+        where customer_info.age = 79 and customer_info.state = "TX" 
+        RETURN customer.first_name
+        """
+        sql = cypher_to_duck(TestSimple.schema, cypher_q)
+        res = duckdb.sql(sql).fetchall()
+        print(res)
