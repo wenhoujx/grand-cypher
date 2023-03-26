@@ -138,3 +138,15 @@ RETURN other.name
         res = duckdb.sql(sql).fetchall()
         assert(res[0][0]) == 'Nicholas', 'Nicholas is the only person with age 22 and lives in TX'
         assert(len(res)) == 1 , 'only one person'
+
+    def test_find_younger_than_another_customer(self): 
+        cypher_q = """MATCH (c1: Customer {first_name: "Lisa"}) -- (c1_info: CustomerInfo {state: "TX"})
+        match (c2: Customer) -- (c2_info: CustomerInfo {state: "TX"})
+        where c1_info.age > c2_info.age and c2.first_name <> "Lisa"
+        RETURN c2.first_name
+        """
+        sql = cypher_to_duck(TestSimple.schema, cypher_q)
+        res = duckdb.sql(sql).fetchall()
+        print(res)
+        # assert(res[0][0]) == 'Nicholas', 'Nicholas is the only person with age 22 and lives in TX'
+        # assert(len(res)) == 1 , 'only one person'

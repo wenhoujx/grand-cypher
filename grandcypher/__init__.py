@@ -189,6 +189,8 @@ class _GrandCypherTransformer(Transformer):
         self._skip = 0
         self._max_hop = 100
         self.entities = []
+        # a list of selects for where clause
+        self._where_selects = []
 
     def count_star(self, count):
         return {
@@ -300,6 +302,14 @@ class _GrandCypherTransformer(Transformer):
                 self.get_primary_field(entity_type, table)
                 for entity_type in source[ENTITY_TYPES].values()
             ]
+            # add selects from where clause. 
+            for where_select in  self._where_selects: 
+                entity_alias, col = where_select.split('.')
+                if entity_alias in source[ENTITY_TYPES]:
+                    entity_type = source[ENTITY_TYPES][entity_alias]
+                    _ignored, field = get_field(self.schema, entity_type, col)
+                    select_terms.append(Field(field, table=table))
+                
             q = q.select(*select_terms)
         return q
 
@@ -484,6 +494,10 @@ class _GrandCypherTransformer(Transformer):
     def condition(self, condition):
         if len(condition) == 3:
             (entity_id, operator, value) = condition
+            # these fields needs to be selected in subqueries
+            self._where_selects.append(entity_id)
+            if isinstance(value, str) and "." in value:
+                self._where_selects.append(value)
             return (entity_id, operator, value)
 
     null = lambda self, _: None
