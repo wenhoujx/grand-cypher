@@ -121,9 +121,9 @@ RETURN other.name
 
     def test_find_max_age_customer(self): 
         cypher_q = """MATCH (customer: Customer) -- (customer_info: CustomerInfo)
-        where customer_info.age = 79 and customer_info.state = "TX" 
+        where customer_info.age = 32 and customer_info.state = "TX" 
         RETURN customer.first_name
         """
         sql = cypher_to_duck(TestSimple.schema, cypher_q)
         res = duckdb.sql(sql).fetchall()
-        print(res)
+        assert(res[0][0]) == 'michael', 'michael is the only person with age 32 and lives in TX'

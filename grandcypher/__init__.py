@@ -37,6 +37,7 @@ from grandcypher.constants import (
     SOURCE,
     TABLE,
     TABLE,
+    TABLE_NAME,
     TYPE,
 )
 from grandcypher.schema import (
@@ -175,19 +176,6 @@ def shortuuid(k=4) -> str:
     return "".join(random.choices(_ALPHABET, k=k))
 
 
-
-
-        return {
-            ENTITY: entity,
-            ENTITY_TYPES: {
-                entity_alias: entity_type
-            }, 
-            TABLE_NAME: table_name(self.schema, entity_type),
-            FILTERS: filters,
-        }
-    
-
-
 class _GrandCypherTransformer(Transformer):
     def __init__(self, schema):
         self._target_graph = None
@@ -255,11 +243,9 @@ class _GrandCypherTransformer(Transformer):
         skip = int(skip[-1])
         self._skip = skip
 
-  
     def _get_entity_source(self, entity):
         entity_type = entity[TYPE]
         entity_alias = entity[NAME]
-        table = Table(table_name(self.schema, entity_type))
         filters = []
         for col, val in entity[FILTERS].items():
             filters.append((entity_type, col, val))
@@ -277,55 +263,48 @@ class _GrandCypherTransformer(Transformer):
 
         return {
             ENTITY: entity,
-            ENTITY_TYPES: [entity_type],
-            ALIASES: [entity_alias],
-            TABLE: table,
+            ENTITY_TYPES: {entity_alias: entity_type},
+            TABLE_NAME: table_name(self.schema, entity_type),
             FILTERS: filters,
             SELECTS: selects,
         }
 
-    def _merge_sources(self, sources):
+    @staticmethod
+    def _merge_sources(sources):
         return {
             **sources[0],
-            ENTITY_TYPES: list(tz.concat([src[ENTITY_TYPES] for src in sources])),
-            ALIASES: list(set(tz.concat([src[ALIASES] for src in sources]))),
+            ENTITY_TYPES: dict(tz.merge(*[src[ENTITY_TYPES] for src in sources])),
             FILTERS: list(tz.concat([src[FILTERS] for src in sources])),
             SELECTS: list(tz.concat([src[SELECTS] for src in sources])),
         }
 
-    def _later_sql_source(self, source, joins=False):
-        alias = source[ALIASES][0]
-
+    def _later_sql_source(self, source):
+        alias = tz.first(source[ENTITY_TYPES].keys())
         if not source[FILTERS]:
-            q = source[TABLE].as_(alias)
+            # return as plain table.
+            q = source[TABLE]
         else:
             # if filters present, we need to use a subquery with select, where, ...
             # TODO pretty weird that the inner and out share the same alias.
-            table = source[TABLE].as_(alias)
+            table = source[TABLE]
             q = Query.from_(table)
             for entity_type, col, val in source[FILTERS]:
                 _ignored, field = get_field(self.schema, entity_type, col)
                 q = q.where(Field(field, table=table) == val)
+            # wrap the subquery in the same alias as the inner table.
             q = q.as_(alias)
             # if filters, we need to select the fields we want to return
             select_terms = self._compute_fields(q, source[SELECTS])
-            if joins: 
-                # include join field which is the primary field.
-                select_terms += [
-                    self.get_primary_field(entity_type, table)
-                    for entity_type in source[ENTITY_TYPES]
-                ]
+            # include join field which is the primary field.
+            select_terms += [
+                self.get_primary_field(entity_type, table)
+                for entity_type in source[ENTITY_TYPES].values()
+            ]
             q = q.select(*select_terms)
         return q
 
     def _first_sql_source(self, source):
-        alias = source[ALIASES][0]
-        # first source is special.
-        table = source[TABLE].as_(alias)
-        #TODO this is pretty horrible. 
-        source.update({
-            TABLE: table,
-        })
+        table = source[TABLE]
         q = Query.from_(table)
         if source[FILTERS]:
             for entity_type, col, val in source[FILTERS]:
@@ -351,14 +330,13 @@ class _GrandCypherTransformer(Transformer):
                 )
         return select_terms
 
-
-    def sql(self):
+    def _merge_entities(self, sources):
         raw_sources = [self._get_entity_source(entity) for entity in self.entities]
         split_sources = [[raw_sources[0]]]
         # try merge adjacent sources backed by the same table.
         for source in raw_sources[1:]:
             if all(
-                source[TABLE] == src[TABLE]
+                source[TABLE_NAME] == src[TABLE_NAME]
                 and source[ENTITY][TYPE] != src[ENTITY][TYPE]
                 for src in split_sources[-1]
             ):
@@ -366,22 +344,36 @@ class _GrandCypherTransformer(Transformer):
                 split_sources[-1].append(source)
             else:
                 split_sources.append([source])
-        sources = [self._merge_sources(split) for split in split_sources]
+        sources = [
+            _GrandCypherTransformer._merge_sources(split) for split in split_sources
+        ]
+        # TODO two updates, pretty horrible, refactor.
+        for source in sources:
+            source.update(
+                {
+                    TABLE: Table(source[TABLE_NAME]).as_(
+                        tz.first(source[ENTITY_TYPES].keys())
+                    ),
+                }
+            )
         for i, source in enumerate(sources):
             source.update(
                 {
                     SOURCE: self._first_sql_source(source)
                     if i == 0
-                    else self._later_sql_source(
-                        source, joins=True
-                    )
+                    else self._later_sql_source(source),
                 }
             )
+        return sources
 
+    def sql(self):
+        sources = self._merge_entities(self.entities)
         q = sources[0][SOURCE]
         select_terms = []
-        for i ,  source in enumerate(sources):
-            select_terms += self._compute_fields(source[TABLE] if i == 0 else source[SOURCE], source[SELECTS])
+        for i, source in enumerate(sources):
+            select_terms += self._compute_fields(
+                source[TABLE] if i == 0 else source[SOURCE], source[SELECTS]
+            )
 
         q = q.select(*select_terms)
 
@@ -390,12 +382,13 @@ class _GrandCypherTransformer(Transformer):
             source = sources[i]
             prev_source = sources[i - 1]
             field_a, field_b = find_join_fields(
-                self.schema, prev_source[ENTITY_TYPES], source[ENTITY_TYPES]
+                self.schema, list(prev_source[ENTITY_TYPES].values()), list(source[ENTITY_TYPES].values())
             )
             q = q.join(source[SOURCE]).on(
                 # join on the outer table if prev is the first source, otherwise join on the prev source.
                 Field(
                     field_a,
+                    # TODO look up how many time i have to do i == 1 ... this is horrible.
                     table=(prev_source[TABLE] if i == 1 else prev_source[SOURCE]),
                 )
                 == Field(field_b, table=source[SOURCE])
@@ -419,23 +412,21 @@ class _GrandCypherTransformer(Transformer):
         else:
             entity_id, op, entity_id_or_value = where_condition
             entity, col = entity_id.split(".")
-            left_field = self.get_field(sources, entity, col)
-            if "." in entity_id_or_value:
-                right_field = self.get_field(sources, *entity_id_or_value.split("."))
+            left_field = self._get_field(sources, entity, col)
+            if isinstance(entity_id_or_value, str) and  "." in entity_id_or_value:
+                right_field = self._get_field(sources, *entity_id_or_value.split("."))
             else:
                 right_field = entity_id_or_value
             return op(left_field, right_field)
 
     def _get_field(self, sources, entity_alias, col):
         for i, source in enumerate(sources):
-            if entity_alias in source[ALIASES]:
-                if i == 0:
-                    # TODO: this is wrong
-                    get_field(self.schema, source[ENTITY][TYPE], col)
-                    return Field(col, table=source[TABLE])
-                else:
-                    # TODO: do this
-                    ...
+            if entity_alias in source[ENTITY_TYPES]:
+                _ignored, field = get_field(
+                    self.schema, source[ENTITY_TYPES][entity_alias], col
+                )
+                return Field(field, table=source[TABLE] if i == 0 else source[SOURCE])
+
         raise Exception(f"Entity {entity_alias} not found in sources")
 
     def _sql_op(self, op, field):
