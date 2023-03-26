@@ -119,7 +119,7 @@ RETURN other.name
         res = duckdb.sql(sql).fetchall()
         assert res[0][0] == 79, 'max age is 79'
 
-    def test_find_max_age_customer(self): 
+    def test_find_by_two_filters(self): 
         cypher_q = """MATCH (customer: Customer) -- (customer_info: CustomerInfo)
         where customer_info.age = 32 and customer_info.state = "TX" 
         RETURN customer.first_name
@@ -127,3 +127,14 @@ RETURN other.name
         sql = cypher_to_duck(TestSimple.schema, cypher_q)
         res = duckdb.sql(sql).fetchall()
         assert(res[0][0]) == 'michael', 'michael is the only person with age 32 and lives in TX'
+        assert(len(res)) == 1 , 'only one person'
+
+    def test_find_lt(self): 
+        cypher_q = """MATCH (customer: Customer) -- (customer_info: CustomerInfo)
+        where customer_info.age <=22  and customer_info.state = "TX" 
+        RETURN customer.first_name
+        """
+        sql = cypher_to_duck(TestSimple.schema, cypher_q)
+        res = duckdb.sql(sql).fetchall()
+        assert(res[0][0]) == 'Nicholas', 'Nicholas is the only person with age 22 and lives in TX'
+        assert(len(res)) == 1 , 'only one person'
