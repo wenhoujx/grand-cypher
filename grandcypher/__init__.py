@@ -359,21 +359,18 @@ class _GrandCypherTransformer(Transformer):
         for i, source in enumerate(sources):
             source.update(
                 {
-                    SOURCE: self._first_sql_source(source)
-                    if i == 0
-                    else self._later_sql_source(source),
+                    # the source of the first table is the table itself.
+                    SOURCE: source[TABLE] if i == 0 else self._later_sql_source(source),
                 }
             )
         return sources
 
     def sql(self):
         sources = self._merge_entities(self.entities)
-        q = sources[0][SOURCE]
+        q = self._first_sql_source(sources[0])
         select_terms = []
         for i, source in enumerate(sources):
-            select_terms += self._compute_fields(
-                source[TABLE] if i == 0 else source[SOURCE], source[SELECTS]
-            )
+            select_terms += self._compute_fields(source[SOURCE], source[SELECTS])
 
         q = q.select(*select_terms)
 
@@ -382,14 +379,15 @@ class _GrandCypherTransformer(Transformer):
             source = sources[i]
             prev_source = sources[i - 1]
             field_a, field_b = find_join_fields(
-                self.schema, list(prev_source[ENTITY_TYPES].values()), list(source[ENTITY_TYPES].values())
+                self.schema,
+                list(prev_source[ENTITY_TYPES].values()),
+                list(source[ENTITY_TYPES].values()),
             )
             q = q.join(source[SOURCE]).on(
                 # join on the outer table if prev is the first source, otherwise join on the prev source.
                 Field(
                     field_a,
-                    # TODO look up how many time i have to do i == 1 ... this is horrible.
-                    table=(prev_source[TABLE] if i == 1 else prev_source[SOURCE]),
+                    table=(prev_source[SOURCE]),
                 )
                 == Field(field_b, table=source[SOURCE])
             )
@@ -413,7 +411,7 @@ class _GrandCypherTransformer(Transformer):
             entity_id, op, entity_id_or_value = where_condition
             entity, col = entity_id.split(".")
             left_field = self._get_field(sources, entity, col)
-            if isinstance(entity_id_or_value, str) and  "." in entity_id_or_value:
+            if isinstance(entity_id_or_value, str) and "." in entity_id_or_value:
                 right_field = self._get_field(sources, *entity_id_or_value.split("."))
             else:
                 right_field = entity_id_or_value
@@ -425,7 +423,7 @@ class _GrandCypherTransformer(Transformer):
                 _ignored, field = get_field(
                     self.schema, source[ENTITY_TYPES][entity_alias], col
                 )
-                return Field(field, table=source[TABLE] if i == 0 else source[SOURCE])
+                return Field(field, table=source[SOURCE])
 
         raise Exception(f"Entity {entity_alias} not found in sources")
 
