@@ -176,64 +176,23 @@ def shortuuid(k=4) -> str:
 
 
 
-def _get_entity_from_host(host: nx.DiGraph, entity_name, entity_attribute=None):
-    if entity_name in host.nodes():
-        # We are looking for a node mapping in the target graph:
-        if entity_attribute:
-            # Get the correct entity from the target host graph,
-            # and then return the attribute:
-            return host.nodes[entity_name].get(entity_attribute, None)
-        else:
-            # Otherwise, just return the node from the host graph
-            return entity_name
-    else:
-        # looking for an edge:
-        edge_data = host.get_edge_data(*entity_name)
-        if not edge_data:
-            return None  # print(f"Nothing found for {entity_name} {entity_attribute}")
-        if entity_attribute:
-            # looking for edge attribute:
-            return edge_data.get(entity_attribute, None)
-        else:
-            return host.get_edge_data(*entity_name)
 
+        return {
+            ENTITY: entity,
+            ENTITY_TYPES: {
+                entity_alias: entity_type
+            }, 
+            TABLE_NAME: table_name(self.schema, entity_type),
+            FILTERS: filters,
+        }
+    
 
-def _get_edge(host: nx.DiGraph, mapping, match_path, u, v):
-    edge_path = match_path[(u, v)]
-    return [
-        host.get_edge_data(mapping[u], mapping[v])
-        for u, v in zip(edge_path[:-1], edge_path[1:])
-    ]
-
-
-CONDITION = Callable[[dict, nx.DiGraph, list], bool]
-
-def cond_(should_be, entity_id, operator, value) -> CONDITION:
-    def inner(match: dict, host: nx.DiGraph, return_endges: list) -> bool:
-        host_entity_id = entity_id.split(".")
-        if host_entity_id[0] in match:
-            host_entity_id[0] = match[host_entity_id[0]]
-        elif host_entity_id[0] in return_endges:
-            # looking for edge...
-            edge_mapping = return_endges[host_entity_id[0]]
-            host_entity_id[0] = (match[edge_mapping[0]], match[edge_mapping[1]])
-        else:
-            raise IndexError(f"Entity {host_entity_id} not in graph.")
-        try:
-            val = operator(_get_entity_from_host(host, *host_entity_id), value)
-        except:
-            val = False
-        if val != should_be:
-            return False
-        return True
-
-    return inner
 
 class _GrandCypherTransformer(Transformer):
     def __init__(self, schema):
         self._target_graph = None
         self.schema = schema
-        self._where_condition: CONDITION = None
+        self._where_condition = None
         self._matches = None
         self._matche_paths = None
         self._return_requests = []
@@ -242,7 +201,6 @@ class _GrandCypherTransformer(Transformer):
         self._skip = 0
         self._max_hop = 100
         self.entities = []
-
 
     def count_star(self, count):
         return {
@@ -258,19 +216,19 @@ class _GrandCypherTransformer(Transformer):
     def sum_aggregate(self, sum):
         return {
             OP: "sum",
-            COLUMN: sum[0], 
+            COLUMN: sum[0],
         }
 
     def avg_aggregate(self, avg):
         return {
             OP: "avg",
-            COLUMN: avg[0], 
+            COLUMN: avg[0],
         }
 
     def min_aggregate(self, min):
         return {
             OP: "min",
-            COLUMN: min[0], 
+            COLUMN: min[0],
         }
 
     def max_aggregate(self, max):
@@ -297,14 +255,7 @@ class _GrandCypherTransformer(Transformer):
         skip = int(skip[-1])
         self._skip = skip
 
-    def returns(self, ignore_limit=False):
-        if self._limit and ignore_limit is False:
-            return {
-                r: self._lookup(r)[self._skip : self._skip + self._limit]
-                for r in self._return_requests
-            }
-        return {r: self._lookup(r)[self._skip :] for r in self._return_requests}
-
+  
     def _get_entity_source(self, entity):
         entity_type = entity[TYPE]
         entity_alias = entity[NAME]
@@ -400,6 +351,7 @@ class _GrandCypherTransformer(Transformer):
                 )
         return select_terms
 
+
     def sql(self):
         raw_sources = [self._get_entity_source(entity) for entity in self.entities]
         split_sources = [[raw_sources[0]]]
@@ -433,6 +385,7 @@ class _GrandCypherTransformer(Transformer):
 
         q = q.select(*select_terms)
 
+        # add possible joins.
         for i in range(1, len(sources)):
             source = sources[i]
             prev_source = sources[i - 1]
@@ -441,12 +394,49 @@ class _GrandCypherTransformer(Transformer):
             )
             q = q.join(source[SOURCE]).on(
                 # join on the outer table if prev is the first source, otherwise join on the prev source.
-                Field(field_a, table=(prev_source[TABLE] if i == 1 else prev_source[SOURCE]))
+                Field(
+                    field_a,
+                    table=(prev_source[TABLE] if i == 1 else prev_source[SOURCE]),
+                )
                 == Field(field_b, table=source[SOURCE])
             )
+        # add where
+        if self._where_condition:
+            q = q.where(self._process_where(sources, self._where_condition))
 
         print(q)
         return str(q)
+
+    def _process_where(self, sources, where_condition):
+        if where_condition[0] == AND:
+            return self._process_where(
+                sources, where_condition[1]
+            ) & self._process_where(sources, where_condition[2])
+        elif where_condition[0] == OR:
+            return self._process_where(
+                sources, where_condition[1]
+            ) | self._process_where(sources, where_condition[2])
+        else:
+            entity_id, op, entity_id_or_value = where_condition
+            entity, col = entity_id.split(".")
+            left_field = self.get_field(sources, entity, col)
+            if "." in entity_id_or_value:
+                right_field = self.get_field(sources, *entity_id_or_value.split("."))
+            else:
+                right_field = entity_id_or_value
+            return op(left_field, right_field)
+
+    def _get_field(self, sources, entity_alias, col):
+        for i, source in enumerate(sources):
+            if entity_alias in source[ALIASES]:
+                if i == 0:
+                    # TODO: this is wrong
+                    get_field(self.schema, source[ENTITY][TYPE], col)
+                    return Field(col, table=source[TABLE])
+                else:
+                    # TODO: do this
+                    ...
+        raise Exception(f"Entity {entity_alias} not found in sources")
 
     def _sql_op(self, op, field):
         if op:
@@ -466,29 +456,7 @@ class _GrandCypherTransformer(Transformer):
         return entity_id.value
 
     def edge_match(self, edge_name):
-        direction = cname = min_hop = max_hop = edge_type = None
-
-        for token in edge_name:
-            if token.type == "MIN_HOP":
-                min_hop = int(token.value)
-            elif token.type == "MAX_HOP":
-                max_hop = int(token.value) + 1
-            elif token.type == "LEFT_ANGLE":
-                direction = "l"
-            elif token.type == "RIGHT_ANGLE" and direction == "l":
-                direction = "b"
-            elif token.type == "RIGHT_ANGLE":
-                direction = "r"
-            elif token.type == "TYPE":
-                edge_type = token.value
-            else:
-                cname = token
-
-        direction = direction if direction is not None else "b"
-        if (min_hop is not None or max_hop is not None) and (direction == "b"):
-            raise TypeError("not support edge hopping for bidirectional edge")
-
-        return (cname, edge_type, direction, min_hop, max_hop)
+        ...
 
     def node_match(self, node_name):
         cname = node_type = json_data = None
@@ -505,8 +473,7 @@ class _GrandCypherTransformer(Transformer):
         return (cname, node_type, json_data)
 
     def match_clause(self, match_clause: Tuple):
-        ... 
-
+        ...
 
     def where_clause(self, where_clause: tuple):
         self._where_condition = where_clause[0]
@@ -521,15 +488,14 @@ class _GrandCypherTransformer(Transformer):
 
     def where_and(self, val):
         return AND
-        
+
     def where_or(self, val):
         return OR
 
     def condition(self, condition):
         if len(condition) == 3:
             (entity_id, operator, value) = condition
-            return (True, entity_id, operator, value)
-        
+            return (entity_id, operator, value)
 
     null = lambda self, _: None
     true = lambda self, _: True
@@ -541,22 +507,22 @@ class _GrandCypherTransformer(Transformer):
         return operator
 
     def op_eq(self, _):
-        return '='
+        return lambda x, y: x == y
 
     def op_neq(self, _):
-        return '<>'
+        return lambda x, y: x != y
 
     def op_gt(self, _):
-        return '>'
+        return lambda x, y: x > y
 
     def op_lt(self, _):
-        return '<'
+        return lambda x, y: x < y
 
     def op_gte(self, _):
-        return '>='
+        return lambda x, y: x >= y
 
     def op_lte(self, _):
-        return '<='
+        return lambda x, y: x <= y
 
     def json_dict(self, tup):
         constraints = {}
