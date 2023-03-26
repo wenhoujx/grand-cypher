@@ -16,3 +16,6 @@ FIELD = 'field'
 PATH = 'path'
 ALIASES = 'aliases'
 SELECTS = 'selects'
+
+AND = 'and'
+OR = 'or'
