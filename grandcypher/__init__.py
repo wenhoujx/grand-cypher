@@ -178,16 +178,12 @@ def shortuuid(k=4) -> str:
 
 class _GrandCypherTransformer(Transformer):
     def __init__(self, schema):
-        self._target_graph = None
         self.schema = schema
         self._where_condition = None
-        self._matches = None
-        self._matche_paths = None
+        self._matches = []
         self._return_requests = []
-        self._return_edges = {}
         self._limit = None
         self._skip = 0
-        self._max_hop = 100
         self.entities = []
         # a list of selects for where clause
         self._where_selects = []
@@ -375,6 +371,8 @@ class _GrandCypherTransformer(Transformer):
             )
         return sources
 
+    def _match_source(self): 
+        ... 
     def sql(self):
         sources = self._merge_entities(self.entities)
         q = self._first_sql_source(sources[0])
@@ -455,7 +453,7 @@ class _GrandCypherTransformer(Transformer):
         return entity_id.value
 
     def edge_match(self, edge_name):
-        ...
+        return None 
 
     def node_match(self, node_name):
         cname = node_type = json_data = None
@@ -463,16 +461,13 @@ class _GrandCypherTransformer(Transformer):
             if not isinstance(token, Token):
                 json_data = token
             elif token.type == "CNAME":
-                cname = token
+                cname = token.value
             elif token.type == "TYPE":
                 node_type = token.value
-        cname = cname or Token("CNAME", shortuuid())
-        json_data = json_data or {}
-        self.entities.append({NAME: cname, TYPE: node_type, FILTERS: json_data})
-        return (cname, node_type, json_data)
+        return {NAME: cname, TYPE: node_type, FILTERS: json_data or {}}
 
     def match_clause(self, match_clause: Tuple):
-        ...
+        self._matches.append(list(filter(lambda x: x is not None, match_clause)))
 
     def where_clause(self, where_clause: tuple):
         self._where_condition = where_clause[0]
