@@ -6,7 +6,7 @@ data/attribute or by structure, using the same language you'd use
 to search in a much larger graph database.
 
 """
-from asyncio import selector_events
+import duckdb
 from distutils.command.build_scripts import first_line_re
 import toolz as tz
 from typing import Dict, List, Callable, Tuple
@@ -27,6 +27,7 @@ from grandcypher.constants import (
     COLUMN,
     COLUMNS,
     ENTITY,
+    ENTITY_ID,
     ENTITY_TYPES,
     FIELD,
     FILTERS,
@@ -35,6 +36,7 @@ from grandcypher.constants import (
     OR,
     SELECTS,
     SOURCE,
+    SQL,
     TABLE,
     TABLE,
     TABLE_NAME,
@@ -196,31 +198,31 @@ class _GrandCypherTransformer(Transformer):
     def count_aggregate(self, count):
         return {
             OP: "count",
-            COLUMN: count[0],
+            ENTITY_ID: count[0],
         }
 
     def sum_aggregate(self, sum):
         return {
             OP: "sum",
-            COLUMN: sum[0],
+            ENTITY_ID: sum[0],
         }
 
     def avg_aggregate(self, avg):
         return {
             OP: "avg",
-            COLUMN: avg[0],
+            ENTITY_ID: avg[0],
         }
 
     def min_aggregate(self, min):
         return {
             OP: "min",
-            COLUMN: min[0],
+            ENTITY_ID: min[0],
         }
 
     def max_aggregate(self, max):
         return {
             OP: "max",
-            COLUMN: max[0],
+            ENTITY_ID: max[0],
         }
 
     def aggregate(self, clause):
@@ -231,7 +233,7 @@ class _GrandCypherTransformer(Transformer):
             if isinstance(item, dict):
                 self._return_requests.append(item)
             else:
-                self._return_requests.append({COLUMN: item})
+                self._return_requests.append({ENTITY_ID: item})
 
     def limit_clause(self, limit):
         limit = int(limit[-1])
@@ -249,8 +251,8 @@ class _GrandCypherTransformer(Transformer):
             filters.append((entity_type, col, val))
         selects = []
         for ret in self._return_requests:
-            column = ret[COLUMN]
-            op = ret.get(OP, None)
+            column = ret[ENTITY_ID]
+            # op field is intentionally ignored
             if entity_alias == column.split(".")[0]:
                 if "." in column:
                     ent, col = column.split(".")
@@ -298,14 +300,14 @@ class _GrandCypherTransformer(Transformer):
                 self.get_primary_field(entity_type, table)
                 for entity_type in source[ENTITY_TYPES].values()
             ]
-            # add selects from where clause. 
-            for where_select in  self._where_selects: 
-                entity_alias, col = where_select.split('.')
+            # add selects from where clause.
+            for where_select in self._where_selects:
+                entity_alias, col = where_select.split(".")
                 if entity_alias in source[ENTITY_TYPES]:
                     entity_type = source[ENTITY_TYPES][entity_alias]
                     _ignored, field = get_field(self.schema, entity_type, col)
                     select_terms.append(Field(field, table=table))
-                
+
             q = q.select(*select_terms)
         return q
 
@@ -366,21 +368,25 @@ class _GrandCypherTransformer(Transformer):
             source.update(
                 {
                     # the source of the first table is the table itself.
-                    SOURCE: source[TABLE] if i == 0 else self._later_sql_source(source),
+                    SOURCE: source[TABLE]
+                    if i == 0
+                    else self._later_sql_source(source),
                 }
             )
         return sources
 
-    def _match_source(self): 
-        ... 
-    def sql(self):
-        sources = self._merge_entities(self.entities)
-        q = self._first_sql_source(sources[0])
-        select_terms = []
-        for i, source in enumerate(sources):
-            select_terms += self._compute_fields(source[SOURCE], source[SELECTS])
+    def _match_source(self):
+        ...
 
-        q = q.select(*select_terms)
+    def _process_match_clause(self):
+        match_sources = []
+        for match in self.match:
+            match_sources.append(self._process_single_match_clause(match))
+        return match_sources
+
+    def _process_single_match_clause(self, match):
+        sources = self._merge_entities(match)
+        q = self._first_sql_source(sources[0])
 
         # add possible joins.
         for i in range(1, len(sources)):
@@ -402,9 +408,18 @@ class _GrandCypherTransformer(Transformer):
         # add where
         if self._where_condition:
             q = q.where(self._process_where(sources, self._where_condition))
+        return {
+            SQL: q,
+            ALIASES: set(tz.concat([source[ENTITY_TYPES].keys() for source in sources]))
+        }
 
-        print(q)
-        return str(q)
+    def sql(self):
+        match_sources = self._process_match_clause()
+        for ret in self._return_requests:
+            
+             
+            
+            
 
     def _process_where(self, sources, where_condition):
         if where_condition[0] == AND:
@@ -453,7 +468,7 @@ class _GrandCypherTransformer(Transformer):
         return entity_id.value
 
     def edge_match(self, edge_name):
-        return None 
+        return None
 
     def node_match(self, node_name):
         cname = node_type = json_data = None
@@ -536,6 +551,12 @@ def cypher_to_duck(schema, cypher_query):
     t = _GrandCypherTransformer(schema)
     t.transform(_GrandCypherGrammar.parse(cypher_query))
     return t.sql()
+
+
+def run_cypher(schema, cypher_query):
+    sql = cypher_to_duck(schema, cypher_query)
+    res = duckdb.sql(sql).fetchall()
+    return res
 
 
 class GrandCypher:

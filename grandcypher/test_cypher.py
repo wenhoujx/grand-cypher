@@ -141,6 +141,7 @@ RETURN other.name
 
     def test_find_younger_than_another_customer(self): 
         cypher_q = """MATCH (c1: Customer {first_name: "Lisa"}) -- (c1_info: CustomerInfo {state: "TX"})
+        with c1 
         match (c2: Customer) -- (c2_info: CustomerInfo {state: "FL"})
         where c1_info.age > c2_info.age and c2.first_name <> "Lisa"
         RETURN c2.first_name, c1.first_name
