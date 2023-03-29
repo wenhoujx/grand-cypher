@@ -12,7 +12,7 @@ You likely already know Cypher from the Neo4j Graph Database. Use it with your f
 
 ## Usage
 
-### Example Usage with NetworkX:
+### Example Usage with NetworkX
 
 ```python
 from grandcypher import GrandCypher
@@ -79,7 +79,6 @@ RETURN
 | `[:Type]` edge-labels                      | ✅ Thanks @khoale88! |     |
 | Graph mutations (e.g. `DELETE`, `SET`,...) | 🛣                   |     |
 
-
 |                |                |                  |
 | -------------- | -------------- | ---------------- |
 | ✅ = Supported | 🛣 = On Roadmap | 🔴 = Not Planned |
@@ -104,3 +103,5 @@ If this tool is helpful to your research, please consider citing it with:
     month={Jun}
 }
 ```
+
+## dev notes
