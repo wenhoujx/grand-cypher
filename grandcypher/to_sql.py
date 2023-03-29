@@ -12,6 +12,7 @@ from grandcypher.constants import (
     FIELD,
     FILTERS,
     NAME,
+    OP,
     OR,
     SELECTS,
     SOURCE,
@@ -20,42 +21,61 @@ from grandcypher.constants import (
     TABLE_NAME,
     TYPE,
 )
-from pypika import Field, Table
+from pypika import Field, Table, Query, functions as fn
+
+from grandcypher.schema import find_join_fields, get_field, primary_field, table_name
 
 
 def _join_entities(schema, entities):
+    for entity in entities:
+        entity.update(
+            {
+                TABLE: Table(table_name(schema, entity[ENTITY][TYPE])).as_(
+                    tz.first(entity[ENTITY_TYPES].keys())
+                ),
+            }
+        )
+        entity.update(
+            {
+                # the source of the first table is the table itself.
+                SOURCE: entity[TABLE]
+                if i == 0
+                else _later_sql_source(entity),
+            }
+        )
+
     q = _first_sql_source(entities[0])
 
     select_terms = []
-    for i, source in enumerate(entities):
-        select_terms += _compute_fields(source[SOURCE], source[SELECTS])
+    for i, entity in enumerate(entities):
+        select_terms += _compute_fields(entity[SOURCE], entity[SELECTS])
 
     q = q.select(*select_terms)
     # add possible joins.
     for i in range(1, len(entities)):
-        source = entities[i]
+        entity = entities[i]
         prev_source = entities[i - 1]
         field_a, field_b = find_join_fields(
-            self.schema,
+            schema,
             list(prev_source[ENTITY_TYPES].values()),
-            list(source[ENTITY_TYPES].values()),
+            list(entity[ENTITY_TYPES].values()),
         )
-        q = q.join(source[SOURCE]).on(
+        q = q.join(entity[SOURCE]).on(
             # join on the outer table if prev is the first source, otherwise join on the prev source.
             Field(
                 field_a,
                 table=(prev_source[SOURCE]),
             )
-            == Field(field_b, table=source[SOURCE])
+            == Field(field_b, table=entity[SOURCE])
         )
 
 
-def _add_where(q, entities, where):
+def _add_where(schema, q, entities, where):
     if where:
-        q = q.where(_process_where(entities, where))
+        q = q.where(_process_where(schema, entities, where))
 
 
-def _execute_query(duckdb, query):
+def _execute_query(query):
     ...
 
 
@@ -68,13 +88,13 @@ def _build_final_query(schema, match_results, where, return_clause):
     ...
 
 
-def process_query(schema, query, duckdb):
+def process_query(schema, query):
     matches = []
     for match in query["matches"]:
         matches.append(
             _process_match_query(schema, match, query.get("where"), query["return"])
         )
-    match_results = [_execute_query(duckdb, match[SQL]) for match in matches]
+    match_results = [_execute_query(match[SQL]) for match in matches]
     if len(match_results) == 0:
         return match_results[0]["result"]
 
@@ -87,7 +107,7 @@ def process_query(schema, query, duckdb):
 
     return_clause = query["return"]
     q = _build_final_query(schema, match_results, where, return_clause)
-    res = _execute_query(duckdb, q)
+    res = _execute_query(q)
     return res
 
 
@@ -140,11 +160,13 @@ def _find_relevant_where(aliases: List[str], where):
 def _process_match_query(schema, match, where, return_clause):
     all_aliases = set(tz.thread_last(match, (map, lambda entity: entity[ALIAS])))
 
-    entities = _merge_entities(match, _find_selects(all_aliases, return_clause, where))
+    entities = _merge_entities(
+        schema, match, _find_selects(all_aliases, return_clause, where)
+    )
     # join the entities together.
     q = _join_entities(schema, entities)
     # add where
-    q = _add_where(q, entities, where)
+    # q = _add_where(q, entities, where)
 
     return {
         SQL: q,
@@ -212,12 +234,12 @@ def _later_sql_source(self, source):
     return q
 
 
-def _first_sql_source(self, source):
-    table = source[TABLE]
+def _first_sql_source(schema, entity):
+    table = entity[TABLE]
     q = Query.from_(table)
-    if source[FILTERS]:
-        for entity_type, col, val in source[FILTERS]:
-            _ignored, field = get_field(self.schema, entity_type, col)
+    if entity[FILTERS]:
+        for entity_type, col, val in entity[FILTERS]:
+            _ignored, field = get_field(schema, entity_type, col)
             q = q.where(Field(field, table=table) == val)
     return q
 
@@ -231,9 +253,9 @@ def _compute_fields(self, source, selects):
     select_terms = []
     for select in selects:
         op = select.get(OP, None)
-        if op == "count" and select[FIELD] == "*":
+        if op == "count" and select[1] == "*":
             select_terms.append(fn.Count("*"))
-        elif select[FIELD] == "*":
+        elif select[1] == "*":
             select_terms.append(self._sql_op(op, source.star))
         else:
             select_terms.append(self._sql_op(op, Field(select[FIELD], table=source)))
@@ -271,12 +293,13 @@ def _update_entity_from_where(entity, where):
     ...
 
 
-def _merge_entities_backed_by_same_table(entities):
+def _merge_entities_backed_by_same_table(schema, entities):
     split_sources = [[entities[0]]]
     # try merge adjacent sources backed by the same table.
     for source in entities[1:]:
         if all(
-            source[TABLE_NAME] == src[TABLE_NAME]
+            table_name(schema, source[ENTITY][TYPE])
+            == table_name(schema, src[ENTITY][TYPE])
             and source[ENTITY][TYPE] != src[ENTITY][TYPE]
             for src in split_sources[-1]
         ):
@@ -288,47 +311,29 @@ def _merge_entities_backed_by_same_table(entities):
     return entities
 
 
-def _merge_entities(entities, selects):
+def _merge_entities(schema, entities, selects):
     # some adjacent entities may be backed by the same table, we should merge them into one entity instead of doing joins.
     entities = [_update_entity(entity, selects) for entity in entities]
-    entities = _merge_entities_backed_by_same_table(entities)
+    entities = _merge_entities_backed_by_same_table(schema, entities)
 
-    # TODO two updates, pretty horrible, refactor.
-    for source in entities:
-        source.update(
-            {
-                TABLE: Table(source[TABLE_NAME]).as_(
-                    tz.first(source[ENTITY_TYPES].keys())
-                ),
-            }
-        )
-    for i, source in enumerate(entities):
-        source.update(
-            {
-                # the source of the first table is the table itself.
-                SOURCE: source[TABLE]
-                if i == 0
-                else _later_sql_source(source),
-            }
-        )
     return entities
 
 
-def _process_where(sources, where_condition):
+def _process_where(entities, where_condition):
     if where_condition[0] == AND:
-        return _process_where(sources, where_condition[1]) & _process_where(
-            sources, where_condition[2]
+        return _process_where(entities, where_condition[1]) & _process_where(
+            entities, where_condition[2]
         )
     elif where_condition[0] == OR:
-        return _process_where(sources, where_condition[1]) | _process_where(
-            sources, where_condition[2]
+        return _process_where(entities, where_condition[1]) | _process_where(
+            entities, where_condition[2]
         )
     else:
         entity_id, op, entity_id_or_value = where_condition
         entity, col = entity_id.split(".")
-        left_field = self._get_field(sources, entity, col)
+        left_field = _get_field(entities, entity, col)
         if isinstance(entity_id_or_value, str) and "." in entity_id_or_value:
-            right_field = self._get_field(sources, *entity_id_or_value.split("."))
+            right_field = _get_field(entities, *entity_id_or_value.split("."))
         else:
             right_field = entity_id_or_value
         return op(left_field, right_field)

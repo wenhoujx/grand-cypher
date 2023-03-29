@@ -307,10 +307,11 @@ class _GrandCypherTransformer(Transformer):
     def query(self, clause):
         self.query = dict(tz.merge(clause))
 
-    def run(self, duckdb): 
+    def run(self): 
         if not self.query: 
             raise ValueError("No query to run")
-        res = process_query(self.schema, self.query, duckdb)
+        res = process_query(self.schema, self.query)
+        return res
         
 
 
@@ -321,9 +322,8 @@ def cypher_to_duck(schema, cypher_query):
 
 
 def run_cypher(schema, cypher_query):
-    sql = cypher_to_duck(schema, cypher_query)
-    res = duckdb.sql(sql).fetchall()
-    return res
+    t = _GrandCypherTransformer(schema).transform(_GrandCypherGrammar.parse(cypher_query))
+    return t.run()
 
 
 class GrandCypher:

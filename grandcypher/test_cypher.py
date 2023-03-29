@@ -1,5 +1,5 @@
 from grandcypher.constants import COLUMNS, MODELS, NAME, PATH, TABLE, TABLES, TYPE
-from . import _GrandCypherTransformer, _GrandCypherGrammar, cypher_to_duck
+from . import _GrandCypherTransformer, _GrandCypherGrammar, cypher_to_duck, run_cypher
 import yaml 
 import os 
 import duckdb
@@ -26,7 +26,8 @@ class TestSimple:
         match (c: Customer)
         return c.first_name
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
+        run_cypher(TestSimple.schema, cypher_q)
+        sql = (TestSimple.schema, cypher_q)
         res = duckdb.sql(sql).fetchall()
         assert len(res) == 100
 
