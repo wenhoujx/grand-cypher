@@ -24,7 +24,7 @@ class TestSimple:
     def test_simple_customer(self):
         cypher_q = """
         match (c: Customer)
-        return c.first_name
+        with c.first_name
         """
         res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 100

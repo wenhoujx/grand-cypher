@@ -22,24 +22,21 @@ from grandcypher.constants import (
     AND,
     ENTITY_ID,
     FILTERS,
+    MATCH,
     OP,
     OR,
+    RETURN,
     TYPE,
+    WHERE,
 )
 from grandcypher.to_sql import process_query
-
 
 
 _GrandCypherGrammar = Lark(
     """
 start               : query
 
-query               : many_match_clause where_clause return_clause
-                    | many_match_clause return_clause
-
-
-many_match_clause   : (match_clause)+
-
+query               : (match_clause (where_clause)? return_clause)+
 
 match_clause        : "match"i node_match (edge_match node_match)*
 
@@ -65,7 +62,7 @@ op                  : "==" -> op_eq
                     | ">="-> op_gte
                     | "<="-> op_lte
 
-return_clause       : "return"i (aggregate | entity_id) ("," (aggregate | entity_id))* limit_clause? skip_clause?
+return_clause       : ("return"i | "with"i )(aggregate | entity_id) ("," (aggregate | entity_id))* limit_clause? skip_clause?
 aggregate           : count_aggregate |count_star | sum_aggregate | avg_aggregate | min_aggregate | max_aggregate
 count_star          : "count"i "(" "*" ")"
 count_aggregate     : "count"i "(" entity_id ")"
@@ -145,7 +142,7 @@ def shortuuid(k=4) -> str:
 class _GrandCypherTransformer(Transformer):
     def __init__(self, schema):
         self.schema = schema
-        self._query = None 
+        self._query = None
 
     def count_star(self, count):
         return {
@@ -187,12 +184,13 @@ class _GrandCypherTransformer(Transformer):
 
     def return_clause(self, clause):
         return {
-            "return": list(
+            TYPE: RETURN,
+            RETURN: list(
                 tz.thread_last(
                     clause,
                     (map, lambda x: x if isinstance(x, dict) else {ENTITY_ID: x}),
                 )
-            )
+            ),
         }
 
     def limit_clause(self, limit):
@@ -223,15 +221,18 @@ class _GrandCypherTransformer(Transformer):
         return {ALIAS: cname, TYPE: node_type, FILTERS: json_data or {}}
 
     def match_clause(self, match_clause: Tuple):
-        return list(
-            tz.thread_last(
-                match_clause,
-                (filter, lambda x: x is not None),
-            )
-        )
+        return {
+            TYPE: MATCH,
+            MATCH: list(
+                tz.thread_last(
+                    match_clause,
+                    (filter, lambda x: x is not None),
+                )
+            ),
+        }
 
     def where_clause(self, where_clause: tuple):
-        return {"where": where_clause[0]}
+        return {TYPE: WHERE, WHERE: where_clause[0]}
 
     def compound_condition(self, val):
         if len(val) == 1:
@@ -285,10 +286,6 @@ class _GrandCypherTransformer(Transformer):
 
     def json_rule(self, rule):
         return (rule[0].value, rule[1])
-
-    def many_match_clause(self, clause):
-        # list of list of nodes at this point
-        return {"matches": clause }
 
     def query(self, clause):
         self._query = dict(tz.merge(clause))
