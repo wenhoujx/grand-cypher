@@ -53,12 +53,6 @@ class TestSimple:
         res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 100
 
-    def test_join_same_table(self):
-        cypher_q = """MATCH (michael:Person {name: 'Michael'})
-MATCH (other:Person)
-WHERE other.state = michael.state AND other.name <> 'Michael'
-RETURN other.name
-"""
     def test_filter_one_table(self): 
         # find all rows with state 'tx' 
         cypher_q = """MATCH (ci:CustomerInfo{state: "TX"})
@@ -86,7 +80,6 @@ RETURN other.name
 
     def test_self_join_filter_no_michael(self): 
         cypher_q = """MATCH (michael:Customer {first_name: "michael"}) -- (company: Company) -- (person: Customer)
-
         RETURN person
         """
         res = run_cypher(TestSimple.schema, cypher_q)
@@ -127,7 +120,6 @@ RETURN other.name
 
     def test_find_younger_than_another_customer(self): 
         cypher_q = """MATCH (c1: Customer {first_name: "Lisa"}) -- (c1_info: CustomerInfo {state: "TX"})
-        with c1 
         match (c2: Customer) -- (c2_info: CustomerInfo {state: "FL"})
         where c1_info.age > c2_info.age and c2.first_name <> "Lisa"
         RETURN c2.first_name, c1.first_name

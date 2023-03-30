@@ -1,5 +1,7 @@
 from html import entities
+import re
 from select import select
+from sys import getfilesystemencoding
 from typing import List
 import toolz as tz
 import duckdb
@@ -73,11 +75,6 @@ def _join_entities(schema, entities):
     return q
 
 
-def _add_where(schema, q, entities, where):
-    if where:
-        q = q.where(_process_where(schema, entities, where))
-
-
 def _execute_query(query):
     res = duckdb.sql(query.get_sql())
     return res
@@ -90,7 +87,8 @@ def _build_final_query(schema, match_results, where, return_clause):
 def _no_aggregate_return(return_clause):
     return not any([ret.get(OP) for ret in return_clause])
 
-def _op_to_fn(op):
+
+def _aggregate_op_to_fn(op):
     if op == "sum":
         return fn.Sum
     elif op == "count":
@@ -101,10 +99,11 @@ def _op_to_fn(op):
         return fn.Min
     elif op == "avg":
         return fn.Avg
-    elif op == None: 
+    elif op == None:
         return lambda x: x
     else:
         raise ValueError(f"Unknown op {op}")
+
 
 def process_query(schema, query):
     matches = []
@@ -113,40 +112,50 @@ def process_query(schema, query):
             _process_match_query(schema, match, query.get("where"), query["return"])
         )
     match_results = [
-        {"result": _execute_query(match[SQL]), ENTITY_TYPES: match[ENTITY_TYPES]} for match in matches
+        {"result": _execute_query(match[SQL]), ENTITY_TYPES: match[ENTITY_TYPES]}
+        for match in matches
     ]
 
-    if len(match_results) == 1 and _no_aggregate_return(query["return"]):
+    if (
+        len(match_results) == 1
+        and not query.get("where")
+        and _no_aggregate_return(query["return"])
+    ):
         return match_results[0]["result"].fetchall()
-    elif len(match_results) == 1 and not _no_aggregate_return(query["return"]):
+    elif len(match_results) == 1:
         # single match with aggregate return
         table_name = tz.first(match_results[0][ENTITY_TYPES].keys())
-        
+        # we are telling duckdb this variable is a result table, since duckdb doesn't support array variables.
         exec(f"{table_name} = match_results[0]['result']")
         table = Table(table_name)
-        q =  Query.from_(table)
+        q = Query.from_(table)
         select_terms = []
         for ret in query["return"]:
             op = ret.get(OP, None)
             entity_id = ret[ENTITY_ID]
-            if '.' not in entity_id:
-                select_terms.append(
-                    _op_to_fn(op)(table.star) 
+            if "." not in entity_id:
+                select_terms.append(_aggregate_op_to_fn(op)(table.star))
+            else:
+                entity_alias, col = entity_id.split(".")
+                _ignored, field = get_field(
+                    schema, match_results[0][ENTITY_TYPES][entity_alias], col
                 )
-            else: 
-                entity_alias, col = entity_id.split('.')
-                _ignored, field = get_field(schema, match_results[0][ENTITY_TYPES][entity_alias], col)
-                select_terms.append(
-                    _op_to_fn(op)(Field(field, table=table))
+                select_terms.append(_aggregate_op_to_fn(op)(Field(field, table=table)))
+        q = q.select(*select_terms)
+        if query.get("where"):
+            q = q.where(
+                _process_where(
+                    schema, table, match_results[0][ENTITY_TYPES], query.get("where")
                 )
+            )
 
-        sql = q.select(*select_terms).get_sql()
-        
+        sql = q.get_sql()
+
         return duckdb.sql(sql).fetchall()
 
     # need to do another query that joins the results of the match queries.
     where = _gather_entity_id_from_where(
-        query.get("where"), [match[ALIASES] for match in matches]
+        [match[ALIASES] for match in matches], query.get("where")
     )
     if not where:
         raise ValueError("No where clause found for join query.")
@@ -182,7 +191,7 @@ def _find_selects(aliases, return_clause, where):
     return selects
 
 
-def _gather_entity_id_from_where(where, aliases: List[str]):
+def _gather_entity_id_from_where(aliases: List[str], where):
     # recursively find the entity_id needs to be selected in where clause.
     if where[0] == AND or where[0] == OR:
         return _gather_entity_id_from_where(
@@ -320,16 +329,6 @@ def _update_entity_from_returns(entity, return_clause):
     )
 
 
-def _first_alias(entity):
-    ...
-
-
-def _update_entity_from_where(entity, where):
-    # add filter from where clause.
-    # add selects from where clause?
-    ...
-
-
 def _merge_entities_backed_by_same_table(schema, entities):
     split_sources = [[entities[0]]]
     # try merge adjacent sources backed by the same table.
@@ -356,45 +355,43 @@ def _merge_entities(schema, entities, selects):
     return entities
 
 
-def _process_where(entities, where_condition):
-    if where_condition[0] == AND:
-        return _process_where(entities, where_condition[1]) & _process_where(
-            entities, where_condition[2]
+def _process_where(schema, table, entity_types, where):
+    if where is None:
+        raise ValueError("where clause cannot be None")
+
+    if where[0] == AND:
+        return _process_where(schema, table, entity_types, where[1]) & _process_where(
+            schema, table, entity_types, where[2]
         )
-    elif where_condition[0] == OR:
-        return _process_where(entities, where_condition[1]) | _process_where(
-            entities, where_condition[2]
+    elif where[0] == OR:
+        return _process_where(schema, table, entity_types, where[1]) | _process_where(
+            schema, table, entity_types, table
         )
     else:
-        entity_id, op, entity_id_or_value = where_condition
+        entity_id, op, entity_id_or_value = where
         entity, col = entity_id.split(".")
-        left_field = _get_field(entities, entity, col)
+        left_field = Field(get_field(schema, entity_types[entity], col)[1], table=table)
         if isinstance(entity_id_or_value, str) and "." in entity_id_or_value:
-            right_field = _get_field(entities, *entity_id_or_value.split("."))
+            right_field = Field(
+                get_field(schema, *entity_id_or_value.split("."))[1], table=table
+            )
         else:
             right_field = entity_id_or_value
-        return op(left_field, right_field)
+        return _condition_op_to_fn(op)(left_field, right_field)
 
 
-def _get_field(self, sources, entity_alias, col):
-    for i, source in enumerate(sources):
-        if entity_alias in source[ENTITY_TYPES]:
-            _ignored, field = get_field(
-                self.schema, source[ENTITY_TYPES][entity_alias], col
-            )
-            return Field(field, table=source[SOURCE])
-
-    raise Exception(f"Entity {entity_alias} not found in sources")
-
-
-def _sql_op(self, op, field):
-    if op:
-        return {
-            "sum": fn.Sum,
-            "count": fn.Count,
-            "avg": fn.Avg,
-            "min": fn.Min,
-            "max": fn.Max,
-        }[op](field)
+def _condition_op_to_fn(op):
+    if op == "eq":
+        return lambda x, y: x == y
+    elif op == "neq":
+        return lambda x, y: x != y
+    elif op == "gt":
+        return lambda x, y: x > y
+    elif op == "gte":
+        return lambda x, y: x >= y
+    elif op == "lt":
+        return lambda x, y: x < y
+    elif op == "lte":
+        return lambda x, y: x <= y
     else:
-        return field
+        raise ValueError(f"unknown op {op}")

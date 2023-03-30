@@ -29,20 +29,6 @@ from grandcypher.constants import (
 from grandcypher.to_sql import process_query
 
 
-_OPERATORS = {
-    "=": lambda x, y: x == y,
-    "==": lambda x, y: x == y,
-    ">=": lambda x, y: x >= y,
-    "<=": lambda x, y: x <= y,
-    "<": lambda x, y: x < y,
-    ">": lambda x, y: x > y,
-    "!=": lambda x, y: x != y,
-    "<>": lambda x, y: x != y,
-    "in": lambda x, y: x in y,
-    "contains": lambda x, y: y in x,
-    "is": lambda x, y: x is y,
-}
-
 
 _GrandCypherGrammar = Lark(
     """
