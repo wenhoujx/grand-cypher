@@ -1,6 +1,8 @@
 from html import entities
+from select import select
 from typing import List
 import toolz as tz
+import duckdb
 from grandcypher.constants import (
     ALIAS,
     ALIASES,
@@ -27,7 +29,7 @@ from grandcypher.schema import find_join_fields, get_field, primary_field, table
 
 
 def _join_entities(schema, entities):
-    for entity in entities:
+    for i, entity in enumerate(entities):
         entity.update(
             {
                 TABLE: Table(table_name(schema, entity[ENTITY][TYPE])).as_(
@@ -40,11 +42,11 @@ def _join_entities(schema, entities):
                 # the source of the first table is the table itself.
                 SOURCE: entity[TABLE]
                 if i == 0
-                else _later_sql_source(entity),
+                else _later_sql_source(schema, entity),
             }
         )
 
-    q = _first_sql_source(entities[0])
+    q = _first_sql_source(schema, entities[0])
 
     select_terms = []
     for i, entity in enumerate(entities):
@@ -68,6 +70,7 @@ def _join_entities(schema, entities):
             )
             == Field(field_b, table=entity[SOURCE])
         )
+    return q
 
 
 def _add_where(schema, q, entities, where):
@@ -76,17 +79,32 @@ def _add_where(schema, q, entities, where):
 
 
 def _execute_query(query):
-    ...
-
-
-def _find_relevant_where(where, aliases):
-    # find the where clause that join different match clauses together
-    ...
+    res = duckdb.sql(query.get_sql())
+    return res
 
 
 def _build_final_query(schema, match_results, where, return_clause):
     ...
 
+
+def _no_aggregate_return(return_clause):
+    return not any([ret.get(OP) for ret in return_clause])
+
+def _op_to_fn(op):
+    if op == "sum":
+        return fn.Sum
+    elif op == "count":
+        return fn.Count
+    elif op == "max":
+        return fn.Max
+    elif op == "min":
+        return fn.Min
+    elif op == "avg":
+        return fn.Avg
+    elif op == None: 
+        return lambda x: x
+    else:
+        raise ValueError(f"Unknown op {op}")
 
 def process_query(schema, query):
     matches = []
@@ -94,12 +112,40 @@ def process_query(schema, query):
         matches.append(
             _process_match_query(schema, match, query.get("where"), query["return"])
         )
-    match_results = [_execute_query(match[SQL]) for match in matches]
-    if len(match_results) == 0:
-        return match_results[0]["result"]
+    match_results = [
+        {"result": _execute_query(match[SQL]), ENTITY_TYPES: match[ENTITY_TYPES]} for match in matches
+    ]
+
+    if len(match_results) == 1 and _no_aggregate_return(query["return"]):
+        return match_results[0]["result"].fetchall()
+    elif len(match_results) == 1 and not _no_aggregate_return(query["return"]):
+        # single match with aggregate return
+        table_name = tz.first(match_results[0][ENTITY_TYPES].keys())
+        
+        exec(f"{table_name} = match_results[0]['result']")
+        table = Table(table_name)
+        q =  Query.from_(table)
+        select_terms = []
+        for ret in query["return"]:
+            op = ret.get(OP, None)
+            entity_id = ret[ENTITY_ID]
+            if '.' not in entity_id:
+                select_terms.append(
+                    _op_to_fn(op)(table.star) 
+                )
+            else: 
+                entity_alias, col = entity_id.split('.')
+                _ignored, field = get_field(schema, match_results[0][ENTITY_TYPES][entity_alias], col)
+                select_terms.append(
+                    _op_to_fn(op)(Field(field, table=table))
+                )
+
+        sql = q.select(*select_terms).get_sql()
+        
+        return duckdb.sql(sql).fetchall()
 
     # need to do another query that joins the results of the match queries.
-    where = _find_relevant_where(
+    where = _gather_entity_id_from_where(
         query.get("where"), [match[ALIASES] for match in matches]
     )
     if not where:
@@ -119,7 +165,7 @@ def _split_entity_id(entity_id):
     if "." not in entity_id:
         return entity_id, "*"
     else:
-        return entity_id.split(".")
+        return tuple(entity_id.split("."))
 
 
 def _find_selects(aliases, return_clause, where):
@@ -131,16 +177,17 @@ def _find_selects(aliases, return_clause, where):
         if entity_alias in aliases:
             selects.append(_split_entity_id(ret[ENTITY_ID]))
 
-    selects += _find_relevant_where(aliases, where)
+    if where:
+        selects += _gather_entity_id_from_where(aliases, where)
     return selects
 
 
-def _find_relevant_where(aliases: List[str], where):
+def _gather_entity_id_from_where(where, aliases: List[str]):
     # recursively find the entity_id needs to be selected in where clause.
     if where[0] == AND or where[0] == OR:
-        return _find_relevant_where(aliases, where[1]) + _find_relevant_where(
-            aliases, where[2]
-        )
+        return _gather_entity_id_from_where(
+            aliases, where[1]
+        ) + _gather_entity_id_from_where(aliases, where[2])
     else:
         # if where[2] is an entity_id , include too
         entity_id_a = where[0]
@@ -170,7 +217,7 @@ def _process_match_query(schema, match, where, return_clause):
 
     return {
         SQL: q,
-        ALIASES: set(tz.concat([source[ENTITY_TYPES].keys() for source in entities])),
+        ENTITY_TYPES: dict(tz.merge([source[ENTITY_TYPES] for source in entities])),
     }
 
 
@@ -200,36 +247,28 @@ def _merge_sources(sources):
     }
 
 
-def _later_sql_source(self, source):
-    alias = tz.first(source[ENTITY_TYPES].keys())
-    if not source[FILTERS]:
+def _later_sql_source(schema, entity):
+    alias = tz.first(entity[ENTITY_TYPES].keys())
+    if not entity[FILTERS]:
         # return as plain table.
-        q = source[TABLE]
+        q = entity[TABLE]
     else:
         # if filters present, we need to use a subquery with select, where, ...
         # TODO pretty weird that the inner and out share the same alias.
-        table = source[TABLE]
+        table = entity[TABLE]
         q = Query.from_(table)
-        for entity_type, col, val in source[FILTERS]:
-            _ignored, field = get_field(self.schema, entity_type, col)
+        for entity_type, col, val in entity[FILTERS]:
+            _ignored, field = get_field(schema, entity_type, col)
             q = q.where(Field(field, table=table) == val)
         # wrap the subquery in the same alias as the inner table.
         q = q.as_(alias)
         # if filters, we need to select the fields we want to return
-        select_terms = self._compute_fields(q, source[SELECTS])
+        select_terms = _compute_fields(q, entity[SELECTS])
         # include join field which is the primary field.
         select_terms += [
-            self.get_primary_field(entity_type, table)
-            for entity_type in source[ENTITY_TYPES].values()
+            get_primary_field(schema, entity_type, table)
+            for entity_type in entity[ENTITY_TYPES].values()
         ]
-        # add selects from where clause.
-        for where_select in self._where_selects:
-            entity_alias, col = where_select.split(".")
-            if entity_alias in source[ENTITY_TYPES]:
-                entity_type = source[ENTITY_TYPES][entity_alias]
-                _ignored, field = get_field(self.schema, entity_type, col)
-                select_terms.append(Field(field, table=table))
-
         q = q.select(*select_terms)
     return q
 
@@ -244,21 +283,19 @@ def _first_sql_source(schema, entity):
     return q
 
 
-def get_primary_field(self, entity_type, table):
-    id_field = primary_field(self.schema, entity_type)
+def get_primary_field(schema, entity_type, table):
+    id_field = primary_field(schema, entity_type)
     return Field(id_field, table=table)
 
 
-def _compute_fields(self, source, selects):
+def _compute_fields(entity, selects):
     select_terms = []
     for select in selects:
-        op = select.get(OP, None)
-        if op == "count" and select[1] == "*":
-            select_terms.append(fn.Count("*"))
-        elif select[1] == "*":
-            select_terms.append(self._sql_op(op, source.star))
+        entity_alias, column = select
+        if column == "*":
+            select_terms.append(entity.star)
         else:
-            select_terms.append(self._sql_op(op, Field(select[FIELD], table=source)))
+            select_terms.append(Field(column, table=entity))
     return select_terms
 
 

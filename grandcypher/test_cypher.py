@@ -26,9 +26,7 @@ class TestSimple:
         match (c: Customer)
         return c.first_name
         """
-        run_cypher(TestSimple.schema, cypher_q)
-        sql = (TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 100
 
     def test_simple_company(self):
@@ -36,8 +34,7 @@ class TestSimple:
         match (c: Company)
         return c.company
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 100
     
     def test_company_and_customer_sample_source_table(self): 
@@ -45,8 +42,7 @@ class TestSimple:
         match (cu: Customer) -- (co: Company)
         return co.company, cu.first_name
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 100
         
     def test_simple_join(self): 
@@ -54,8 +50,7 @@ class TestSimple:
         match (cu: Customer) -- (ci: CustomerInfo)
         return cu.first_name, ci.age, ci.state
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 100
 
     def test_join_same_table(self):
@@ -69,8 +64,7 @@ RETURN other.name
         cypher_q = """MATCH (ci:CustomerInfo{state: "TX"})
         RETURN ci
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall() 
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 12
 
     def test_filter_join_table(self): 
@@ -78,18 +72,16 @@ RETURN other.name
         cypher_q = """MATCH (ci:CustomerInfo{state: "TX"}) -- (cu: Customer) -- (co: Company {company:"google"})
         RETURN ci, cu, co
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
-        print(res)
+        res = run_cypher(TestSimple.schema, cypher_q)
+
         assert len(res) == 2, 'two persons lives in tx and works for google'
 
     def test_self_join_filter(self): 
         cypher_q = """MATCH (michael:Customer {first_name: "michael"}) -- (company: Company) -- (person: Customer)
         RETURN person
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
-        print(res)
+        res = run_cypher(TestSimple.schema, cypher_q)
+
         assert len(res) == 18, '18 ppl including michael works for the same company'
 
     def test_self_join_filter_no_michael(self): 
@@ -97,18 +89,14 @@ RETURN other.name
 
         RETURN person
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
-        print(res)
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 18, '18 ppl including michael works for the same company'
 
     def test_count(self): 
         cypher_q = """MATCH (company:Company {company: "google"}) -- (customer: Customer)
         RETURN count(customer)
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
-        print(res)
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 1 , 'single row'
         assert res[0][0] == 18, 'single value == 18'
 
@@ -116,8 +104,7 @@ RETURN other.name
         cypher_q = """MATCH (customer: Customer) -- (customer_info: CustomerInfo)
         RETURN max(customer_info.age)
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert res[0][0] == 79, 'max age is 79'
 
     def test_find_by_two_filters(self): 
@@ -125,8 +112,7 @@ RETURN other.name
         where customer_info.age = 32 and customer_info.state = "TX" 
         RETURN customer.first_name
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert(res[0][0]) == 'michael', 'michael is the only person with age 32 and lives in TX'
         assert(len(res)) == 1 , 'only one person'
 
@@ -135,8 +121,7 @@ RETURN other.name
         where customer_info.age <=22  and customer_info.state = "TX" 
         RETURN customer.first_name
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = run_cypher(TestSimple.schema, cypher_q)
         assert(res[0][0]) == 'Nicholas', 'Nicholas is the only person with age 22 and lives in TX'
         assert(len(res)) == 1 , 'only one person'
 
@@ -147,8 +132,7 @@ RETURN other.name
         where c1_info.age > c2_info.age and c2.first_name <> "Lisa"
         RETURN c2.first_name, c1.first_name
         """
-        sql = cypher_to_duck(TestSimple.schema, cypher_q)
-        res = duckdb.sql(sql).fetchall()
+        res = run_cypher(TestSimple.schema, cypher_q)
         print(res)
         # assert(res[0][0]) == 'Nicholas', 'Nicholas is the only person with age 22 and lives in TX'
         # assert(len(res)) == 1 , 'only one person'

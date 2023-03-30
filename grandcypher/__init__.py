@@ -26,7 +26,7 @@ from grandcypher.constants import (
     OR,
     TYPE,
 )
-from grandcypher.to_sql import  process_query
+from grandcypher.to_sql import process_query
 
 
 _OPERATORS = {
@@ -159,7 +159,7 @@ def shortuuid(k=4) -> str:
 class _GrandCypherTransformer(Transformer):
     def __init__(self, schema):
         self.schema = schema
-        self.query = None 
+        self._query = None 
 
     def count_star(self, count):
         return {
@@ -274,22 +274,22 @@ class _GrandCypherTransformer(Transformer):
         return operator
 
     def op_eq(self, _):
-        return 'eq'
+        return "eq"
 
     def op_neq(self, _):
-        return 'neq'
+        return "neq"
 
     def op_gt(self, _):
-        return 'gt'
+        return "gt"
 
     def op_lt(self, _):
-        return 'lt'
+        return "lt"
 
     def op_gte(self, _):
-        return 'gte'
+        return "gte"
 
     def op_lte(self, _):
-        return 'lte'
+        return "lte"
 
     def json_dict(self, tup):
         constraints = {}
@@ -302,17 +302,16 @@ class _GrandCypherTransformer(Transformer):
 
     def many_match_clause(self, clause):
         # list of list of nodes at this point
-        return {"matches": list(tz.concat(clause))}
+        return {"matches": clause }
 
     def query(self, clause):
-        self.query = dict(tz.merge(clause))
+        self._query = dict(tz.merge(clause))
 
-    def run(self): 
-        if not self.query: 
+    def run(self):
+        if not self.query:
             raise ValueError("No query to run")
-        res = process_query(self.schema, self.query)
+        res = process_query(self.schema, self._query)
         return res
-        
 
 
 def cypher_to_duck(schema, cypher_query):
@@ -322,7 +321,8 @@ def cypher_to_duck(schema, cypher_query):
 
 
 def run_cypher(schema, cypher_query):
-    t = _GrandCypherTransformer(schema).transform(_GrandCypherGrammar.parse(cypher_query))
+    t = _GrandCypherTransformer(schema)
+    t.transform(_GrandCypherGrammar.parse(cypher_query))
     return t.run()
 
 
