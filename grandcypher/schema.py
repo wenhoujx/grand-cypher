@@ -6,17 +6,17 @@ def table_name(schema, entity_type):
     return next((s[TABLE] for s in  schema[MODELS] if s[NAME] == entity_type), None)
 
 
-def get_field(schema, entity, column): 
+def get_field(schema, entity_type, column): 
     # returns tuple of (raw table name, raw field)
     for mod in schema[MODELS]: 
-        if mod[NAME] != entity: 
+        if mod[NAME] != entity_type: 
             continue 
         for col in mod[COLUMNS]: 
             if col[NAME] != column: 
                 continue 
             else : 
                 return (mod[TABLE], col.get(FIELD) or col[NAME])
-    raise ValueError(f"could not find field {column} in entity {entity}")
+    raise ValueError(f"could not find field {column} in entity {entity_type}")
     
 def get_all_fields(schema, entity_type): 
     # returns all fields of an entity. 

@@ -91,13 +91,13 @@ class TestSimple:
         """
         res = run_cypher(TestSimple.schema, cypher_q)
         assert len(res) == 1 , 'single row'
-        assert res[0][0] == 18, 'single value == 18'
+        assert res.fetchall()[0][0] == 18, 'single value == 18'
 
     def test_max_age(self): 
         cypher_q = """MATCH (customer: Customer) -- (customer_info: CustomerInfo)
         RETURN max(customer_info.age)
         """
-        res = run_cypher(TestSimple.schema, cypher_q)
+        res = run_cypher(TestSimple.schema, cypher_q).fetchall()
         assert res[0][0] == 79, 'max age is 79'
 
     def test_find_by_two_filters(self): 
@@ -105,7 +105,7 @@ class TestSimple:
         where customer_info.age = 32 and customer_info.state = "TX" 
         RETURN customer.first_name
         """
-        res = run_cypher(TestSimple.schema, cypher_q)
+        res = run_cypher(TestSimple.schema, cypher_q).fetchall()
         assert(res[0][0]) == 'michael', 'michael is the only person with age 32 and lives in TX'
         assert(len(res)) == 1 , 'only one person'
 
@@ -114,17 +114,16 @@ class TestSimple:
         where customer_info.age <=22  and customer_info.state = "TX" 
         RETURN customer.first_name
         """
-        res = run_cypher(TestSimple.schema, cypher_q)
+        res = run_cypher(TestSimple.schema, cypher_q).fetchall()
         assert(res[0][0]) == 'Nicholas', 'Nicholas is the only person with age 22 and lives in TX'
         assert(len(res)) == 1 , 'only one person'
 
     def test_find_younger_than_another_customer(self): 
-        cypher_q = """MATCH (c1: Customer {first_name: "Lisa"}) -- (c1_info: CustomerInfo {state: "TX"})
-        match (c2: Customer) -- (c2_info: CustomerInfo {state: "FL"})
-        where c1_info.age > c2_info.age and c2.first_name <> "Lisa"
-        RETURN c2.first_name, c1.first_name
+        cypher_q = """MATCH (customer: Customer {first_name: "Lisa"}) -- (lisa: CustomerInfo {state: "TX"})
+        with lisa
+        match (cu: Customer) -- (c2_info: CustomerInfo {state: "FL"})
+        where c2_info.age > lisa.age and cu.first_name <> "Lisa"
+        RETURN cu.first_name
         """
-        res = run_cypher(TestSimple.schema, cypher_q)
-        print(res)
-        # assert(res[0][0]) == 'Nicholas', 'Nicholas is the only person with age 22 and lives in TX'
-        # assert(len(res)) == 1 , 'only one person'
+        res = run_cypher(TestSimple.schema, cypher_q).fetchall()
+        assert(len(res)) == 11, '11 people lives in FL are younger than Lisa'

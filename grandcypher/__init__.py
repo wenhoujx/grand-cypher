@@ -132,11 +132,7 @@ key                 : CNAME
 __version__ = "0.2.0"
 
 
-_ALPHABET = string.ascii_lowercase + string.digits
 
-
-def shortuuid(k=4) -> str:
-    return "".join(random.choices(_ALPHABET, k=k))
 
 
 class _GrandCypherTransformer(Transformer):
@@ -288,7 +284,7 @@ class _GrandCypherTransformer(Transformer):
         return (rule[0].value, rule[1])
 
     def query(self, clause):
-        self._query = dict(tz.merge(clause))
+        self._query = clause 
 
     def run(self):
         if not self.query:
