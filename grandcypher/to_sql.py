@@ -1,37 +1,22 @@
-from errno import ENFILE
-from html import entities
 import random
-import re
-from select import select
 import string
-from sys import getfilesystemencoding
 from tkinter import CURRENT
-from typing import List
 import toolz as tz
 import duckdb
 from grandcypher.constants import (
     ALIAS,
-    ALIASES,
     AND,
-    COLUMN,
-    ENTITY,
     ENTITY_ID,
-    ENTITY_TYPE,
     ENTITY_TYPES,
-    FIELD,
     FILTERS,
     MATCH,
-    NAME,
     OP,
     OR,
     QUERY,
     RESULT,
     RETURN,
-    SELECTS,
-    SOURCE,
     SQL,
     TABLE,
-    TABLE_NAME,
     TYPE,
     WHERE,
 )
@@ -232,6 +217,7 @@ def _process_where(schema, join_tables, where):
             schema, join_tables, where[2]
         )
     else:
+        # TODO: handle subquery is on the left hand side.
         entity_id, op, entity_id_or_value = where
         entity, col = entity_id.split(".")
         target = tz.first(filter(lambda t: entity in t[ENTITY_TYPES], join_tables))
