@@ -62,7 +62,8 @@ op                  : "==" -> op_eq
                     | ">="-> op_gte
                     | "<="-> op_lte
 
-return_clause       : ("return"i | "with"i )(aggregate | entity_id) ("," (aggregate | entity_id))* limit_clause? skip_clause?
+return_clause       : ("return"i | "with"i )(return_atom) ("," (return_atom))* limit_clause? skip_clause?
+return_atom         : aggregate | entity_id ("as"i CNAME)?
 aggregate           : count_aggregate |count_star | sum_aggregate | avg_aggregate | min_aggregate | max_aggregate
 count_star          : "count"i "(" "*" ")"
 count_aggregate     : "count"i "(" entity_id ")"
@@ -132,9 +133,6 @@ key                 : CNAME
 __version__ = "0.2.0"
 
 
-
-
-
 class _GrandCypherTransformer(Transformer):
     def __init__(self, schema):
         self.schema = schema
@@ -178,15 +176,21 @@ class _GrandCypherTransformer(Transformer):
     def aggregate(self, clause):
         return clause[0]
 
+    def return_atom(self, clause):
+        if len(clause) == 0:
+            raise ValueError(f"Invalid return clause: {clause}")
+
+        ret = {}
+        ret.update(clause[0] if isinstance(clause[0], dict) else {ENTITY_ID: clause[0]})
+        if len(clause) == 2:
+            # has alias
+            ret.update({ALIAS: clause[1].value})
+        return ret
+
     def return_clause(self, clause):
         return {
             TYPE: RETURN,
-            RETURN: list(
-                tz.thread_last(
-                    clause,
-                    (map, lambda x: x if isinstance(x, dict) else {ENTITY_ID: x}),
-                )
-            ),
+            RETURN: clause
         }
 
     def limit_clause(self, limit):
@@ -284,7 +288,7 @@ class _GrandCypherTransformer(Transformer):
         return (rule[0].value, rule[1])
 
     def query(self, clause):
-        self._query = clause 
+        self._query = clause
 
     def run(self):
         if not self.query:

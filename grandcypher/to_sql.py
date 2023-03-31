@@ -62,6 +62,7 @@ def _process_single_query(schema, query, previous_result):
             ENTITY_TYPES: previous_result[ENTITY_TYPES],
             CURRENT: False,
         }
+        
 
     sql = _process_match_query(
         schema, query[MATCH], query.get(WHERE), query[RETURN], previous_table
@@ -104,10 +105,6 @@ def shortuuid(k=4) -> str:
     return "".join(random.choices(string.ascii_lowercase, k=k))
 
 
-def _add_previous_result_table(join_tables, previous_result):
-    return join_tables
-
-
 def _process_match_query(schema, match, where, return_clause, previous_table):
     join_tables = _find_join_tables(schema, match)
     if previous_table:
@@ -146,16 +143,20 @@ def _process_match_query(schema, match, where, return_clause, previous_table):
         entity_alias, col = _split_entity_id(ret[ENTITY_ID])
         target_table = _find_target_join_table(join_tables, entity_alias)
         op = ret.get(OP)
+        field_alias = ret.get(ALIAS)
         if col == "*" and op == "count":
-            select_terms.append(_aggregate_op_to_fn(op)("*"))
+            field = _aggregate_op_to_fn(op)("*")
+            select_terms.append(field.as_(field_alias) if field_alias else field)
         elif col == "*":
-            select_terms.append(_aggregate_op_to_fn(op)(target_table[TABLE].star))
+            field = _aggregate_op_to_fn(op)(target_table[TABLE].star)
+            select_terms.append(field.as_(field_alias) if field_alias else field)
         else:
             _ignored, field = get_field(
                 schema, target_table[ENTITY_TYPES][entity_alias], col
             )
+            sql_field = _aggregate_op_to_fn(op)(Field(field, table=target_table[TABLE]))
             select_terms.append(
-                _aggregate_op_to_fn(op)(Field(field, table=target_table[TABLE]))
+                sql_field.as_(field_alias) if field_alias else sql_field
             )
 
     q = q.select(*select_terms)
