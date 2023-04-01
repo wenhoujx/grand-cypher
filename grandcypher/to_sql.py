@@ -15,6 +15,7 @@ from grandcypher.constants import (
     QUERY,
     RESULT,
     RETURN,
+    RETURN_ALIASES,
     SQL,
     TABLE,
     TYPE,
@@ -61,8 +62,12 @@ def _process_single_query(schema, query, previous_result):
             TABLE: table,
             ENTITY_TYPES: previous_result[ENTITY_TYPES],
             CURRENT: False,
+            RETURN_ALIASES: list(tz.thread_last(
+                previous_result[QUERY][RETURN],
+                (filter, lambda ret : ret.get(ALIAS) is not None),
+                (map, lambda ret : ret[ALIAS]),
+            ))
         }
-        
 
     sql = _process_match_query(
         schema, query[MATCH], query.get(WHERE), query[RETURN], previous_table
@@ -236,10 +241,25 @@ def _process_where(schema, join_tables, where):
                 )
             else:
                 right_field = Field(field, table=target[TABLE])
-
+        elif isinstance(entity_id_or_value, str) and (join_table := _refers_to_previous_alias(entity_id_or_value, join_tables)):
+            # refers to a alias from previous match clause.
+            right_field = Query.from_(join_table[TABLE]).select(
+                Field(entity_id_or_value, table=join_table[TABLE])
+            )
         else:
             right_field = entity_id_or_value
         return _condition_op_to_fn(op)(left_field, right_field)
+
+def _refers_to_previous_alias(alias, join_tables):
+    for table in join_tables:
+        if table[CURRENT]: 
+            # must be a previous match clause join table 
+            continue 
+        if not table[RETURN_ALIASES]: 
+            continue 
+        if alias in table[RETURN_ALIASES]:
+            return table 
+    return None 
 
 
 def _condition_op_to_fn(op):

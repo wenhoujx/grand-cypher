@@ -1,5 +1,6 @@
 # all constants used in this project
-CURRNET = "current"
+RETURN_ALIASES = "return_aliases"
+CURRENT = "current"
 OP = "op"
 FILTERS = "filters"
 NAME = "name"

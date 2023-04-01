@@ -134,3 +134,13 @@ class TestSimple:
         """ 
         res = run_cypher(TestSimple.schema, cypher_q)
         assert(len(res)) == 1, 'one row'
+
+    def test_as_complex(self): 
+        cypher_q = """MATCH (customer: Customer {first_name: "Lisa"}) -- (lisa: CustomerInfo {state: "TX"})
+        with lisa.age as lisa_age
+        match (cu: Customer) -- (c2_info: CustomerInfo {state: "FL"})
+        where c2_info.age > lisa_age and cu.first_name <> "Lisa"
+        RETURN cu.first_name, c2_info
+        """
+        res = run_cypher(TestSimple.schema, cypher_q).fetchall()
+        assert(len(res)) == 11, '11 people lives in FL are younger than Lisa'
