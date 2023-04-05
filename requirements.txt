@@ -8,3 +8,4 @@ pypika
 pyyaml
 duckdb
 toolz
+jupyterlab

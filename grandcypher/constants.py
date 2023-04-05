@@ -30,3 +30,4 @@ QUERY = "query"
 AND = "and"
 OR = "or"
 RESULT = "result"
+LIMIT = 'limit'

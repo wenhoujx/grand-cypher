@@ -9,6 +9,7 @@ from grandcypher.constants import (
     ENTITY_ID,
     ENTITY_TYPES,
     FILTERS,
+    LIMIT,
     MATCH,
     OP,
     OR,
@@ -62,15 +63,22 @@ def _process_single_query(schema, query, previous_result):
             TABLE: table,
             ENTITY_TYPES: previous_result[ENTITY_TYPES],
             CURRENT: False,
-            RETURN_ALIASES: list(tz.thread_last(
-                previous_result[QUERY][RETURN],
-                (filter, lambda ret : ret.get(ALIAS) is not None),
-                (map, lambda ret : ret[ALIAS]),
-            ))
+            RETURN_ALIASES: list(
+                tz.thread_last(
+                    previous_result[QUERY][RETURN],
+                    (filter, lambda ret: ret.get(ALIAS) is not None),
+                    (map, lambda ret: ret[ALIAS]),
+                )
+            ),
         }
 
     sql = _process_match_query(
-        schema, query[MATCH], query.get(WHERE), query[RETURN], previous_table
+        schema,
+        query[MATCH],
+        query.get(WHERE),
+        query[RETURN],
+        query.get(LIMIT),
+        previous_table,
     )
 
     return {
@@ -110,7 +118,7 @@ def shortuuid(k=4) -> str:
     return "".join(random.choices(string.ascii_lowercase, k=k))
 
 
-def _process_match_query(schema, match, where, return_clause, previous_table):
+def _process_match_query(schema, match, where, return_clause, limit, previous_table):
     join_tables = _find_join_tables(schema, match)
     if previous_table:
         join_tables.append(previous_table)
@@ -165,6 +173,9 @@ def _process_match_query(schema, match, where, return_clause, previous_table):
             )
 
     q = q.select(*select_terms)
+    if limit:
+        q = q.limit(limit)
+
     return q.get_sql()
 
 
@@ -241,7 +252,9 @@ def _process_where(schema, join_tables, where):
                 )
             else:
                 right_field = Field(field, table=target[TABLE])
-        elif isinstance(entity_id_or_value, str) and (join_table := _refers_to_previous_alias(entity_id_or_value, join_tables)):
+        elif isinstance(entity_id_or_value, str) and (
+            join_table := _refers_to_previous_alias(entity_id_or_value, join_tables)
+        ):
             # refers to a alias from previous match clause.
             right_field = Query.from_(join_table[TABLE]).select(
                 Field(entity_id_or_value, table=join_table[TABLE])
@@ -250,16 +263,17 @@ def _process_where(schema, join_tables, where):
             right_field = entity_id_or_value
         return _condition_op_to_fn(op)(left_field, right_field)
 
+
 def _refers_to_previous_alias(alias, join_tables):
     for table in join_tables:
-        if table[CURRENT]: 
-            # must be a previous match clause join table 
-            continue 
-        if not table[RETURN_ALIASES]: 
-            continue 
+        if table[CURRENT]:
+            # must be a previous match clause join table
+            continue
+        if not table[RETURN_ALIASES]:
+            continue
         if alias in table[RETURN_ALIASES]:
-            return table 
-    return None 
+            return table
+    return None
 
 
 def _condition_op_to_fn(op):
