@@ -1,5 +1,5 @@
 import re
-from grandcypher.constants import COLUMNS, FIELD, MODELS, NAME, TABLE, TABLES, TYPE
+from duckcypher.constants import COLUMNS, FIELD, MODELS, NAME, TABLE, TABLES, TYPE
 import toolz as tz
 import duckdb
 
@@ -49,6 +49,18 @@ def add_csv_table(schema, table_name, csv_path):
         )
     except:
         raise ValueError(f"could not add table {table_name} from {csv_path}")
+
+
+def add_table_from_variable(schema, table_name, var):
+    if not isinstance(var, duckdb.DuckDBPyRelation):
+        raise ValueError(f"var must be a duckdb.DuckDBPyRelation, not {type(var)}")
+    duckdb.register(table_name, var.fetch_arrow_table())
+    schema.setdefault(TABLES, []).append(
+        {
+            NAME: table_name,
+            TYPE: "duckdb_variable",
+        }
+    )
 
 
 def table_name(schema, entity_type):

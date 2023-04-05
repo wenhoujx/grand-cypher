@@ -4,7 +4,7 @@ from typing import Tuple
 
 from lark import Lark, Transformer, v_args, Token
 
-from grandcypher.constants import (
+from duckcypher.constants import (
     ALIAS,
     AND,
     ENTITY_ID,
@@ -17,10 +17,10 @@ from grandcypher.constants import (
     TYPE,
     WHERE,
 )
-from grandcypher.to_sql import process_query
+from duckcypher.to_sql import process_query
 
 
-_GrandCypherGrammar = Lark(
+_DuckCypherGrammar = Lark(
     """
 start               : query
 
@@ -119,7 +119,7 @@ key                 : CNAME
 )
 
 
-class _GrandCypherTransformer(Transformer):
+class _DuckCypherTransformer(Transformer):
     def __init__(self, schema):
         self.schema = schema
         self._query = None
@@ -283,6 +283,6 @@ class _GrandCypherTransformer(Transformer):
 
 
 def run_cypher(schema, cypher_query):
-    t = _GrandCypherTransformer(schema)
-    t.transform(_GrandCypherGrammar.parse(cypher_query))
+    t = _DuckCypherTransformer(schema)
+    t.transform(_DuckCypherGrammar.parse(cypher_query))
     return t.run()

@@ -3,7 +3,7 @@ import string
 from tkinter import CURRENT
 import toolz as tz
 import duckdb
-from grandcypher.constants import (
+from duckcypher.constants import (
     ALIAS,
     AND,
     ENTITY_ID,
@@ -24,7 +24,13 @@ from grandcypher.constants import (
 )
 from pypika import Field, Table, Query, functions as fn
 
-from grandcypher.schema import find_join_fields, get_field, primary_field, table_name
+from duckcypher.schema import (
+    find_join_fields,
+    get_all_fields,
+    get_field,
+    primary_field,
+    table_name,
+)
 
 
 def _aggregate_op_to_fn(op):
@@ -160,9 +166,16 @@ def _process_match_query(schema, match, where, return_clause, limit, previous_ta
         if col == "*" and op == "count":
             field = _aggregate_op_to_fn(op)("*")
             select_terms.append(field.as_(field_alias) if field_alias else field)
-        elif col == "*":
+        elif col == "*" and op:
             field = _aggregate_op_to_fn(op)(target_table[TABLE].star)
             select_terms.append(field.as_(field_alias) if field_alias else field)
+        elif col == "*" and not op:
+            select_terms += list(
+                tz.thread_last(
+                    get_all_fields(schema, target_table[ENTITY_TYPES][entity_alias]),
+                    (map, lambda x: Field(x, table=target_table[TABLE])),
+                )
+            )
         else:
             _ignored, field = get_field(
                 schema, target_table[ENTITY_TYPES][entity_alias], col
