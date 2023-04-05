@@ -13,6 +13,7 @@ from duckcypher.constants import (
     MATCH,
     OP,
     OR,
+    ORDER_BY,
     RETURN,
     TYPE,
     WHERE,
@@ -24,7 +25,7 @@ _DuckCypherGrammar = Lark(
     """
 start               : query
 
-query               : (match_clause (where_clause)? return_clause limit_clause?)+
+query               : (match_clause (where_clause)? return_clause order_by_clause? limit_clause?)+
 
 match_clause        : "match"i node_match (edge_match node_match)*
 
@@ -61,6 +62,7 @@ min_aggregate       : "min"i "(" entity_id ")"
 max_aggregate       : "max"i "(" entity_id ")"
 
 limit_clause        : "limit"i NUMBER
+order_by_clause     : "order"i "by"i (entity_id) 
 skip_clause         : "skip"i NUMBER
 
 
@@ -168,7 +170,7 @@ class _DuckCypherTransformer(Transformer):
 
         ret = {}
         ret.update(
-            clause[0] if isinstance(clause[0], dict) else {ENTITY_ID: clause[0].value}
+            clause[0] if isinstance(clause[0], dict) else {ENTITY_ID: clause[0]}
         )
         if len(clause) == 2:
             # has alias
@@ -177,6 +179,9 @@ class _DuckCypherTransformer(Transformer):
 
     def return_clause(self, clause):
         return {TYPE: RETURN, RETURN: clause}
+
+    def order_by_clause(self, order_by):
+        return {TYPE: ORDER_BY, ORDER_BY: order_by}
 
     def limit_clause(self, limit):
         limit = int(limit[-1])

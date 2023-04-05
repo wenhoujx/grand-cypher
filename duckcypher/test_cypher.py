@@ -1,5 +1,5 @@
-from grandcypher.constants import NAME, PATH, TABLES, TYPE
-from . import run_cypher
+from duckcypher.constants import NAME, PATH, TABLES, TYPE
+from duckcypher.parser import run_cypher
 import yaml 
 import os 
 import duckdb

@@ -1,6 +1,6 @@
 {
     "python.testing.pytestArgs": [
-        "grandcypher"
+        "duckcypher"
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
