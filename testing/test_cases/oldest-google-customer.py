@@ -53,22 +53,10 @@ dc.add_model(
 )
 oldest_google_customer = dc.run_cypher(
     """
-    MATCH (info: CustomerInfo") -- (c:Customer)--(g:Company {company: "Google"})
+    MATCH (info: CustomerInfo) -- (c:Customer) -- (g:Company {company: "google"})
+    return c , info
     order by info.age desc
     limit 1 
-    return c 
     """
-
-
-# dc.add_table_from_variable("google_customers", google_customers)
-
-# dc.add_model(
-#     "GoogleCustomer",
-#     "google_customers",
-#     {
-#         "columns": [
-#             {"name": "first_name", "field": "first_name", "type": "string"},
-#             {"name": "id", "field": "id", "type": "int", "primary": True},
-#         ]
-#     },
-# )
+)
+oldest_google_customer.show()
