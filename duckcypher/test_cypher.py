@@ -155,10 +155,11 @@ class TestSimple:
 
     def test_order_by(self):
         cypher_q = """MATCH (customer: Customer) -- (customer_info: CustomerInfo)
-        return customer 
+        return customer, customer_info.age
         order by customer_info.age desc
         limit 1 
         """
         res = run_cypher(TestSimple.schema, cypher_q).fetchall()
         assert (len(res)) == 1, "one row"
-        assert res[0][1] == "Scott", "Scott is the oldest"
+        assert "Scott" in res[0], "Scott is the oldest"
+        assert res[0][-1] == 79, "Scott is 79"
