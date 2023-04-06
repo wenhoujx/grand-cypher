@@ -7,6 +7,8 @@ from lark import Lark, Transformer, v_args, Token
 from duckcypher.constants import (
     ALIAS,
     AND,
+    COLUMN,
+    DIRECTION,
     ENTITY_ID,
     FILTERS,
     LIMIT,
@@ -62,7 +64,8 @@ min_aggregate       : "min"i "(" entity_id ")"
 max_aggregate       : "max"i "(" entity_id ")"
 
 limit_clause        : "limit"i NUMBER
-order_by_clause     : "order"i "by"i (entity_id) 
+order_by_clause     : "order"i "by"i (entity_id) order_by_direction
+!order_by_direction  : (("desc"i) | ("asc"i))? 
 skip_clause         : "skip"i NUMBER
 
 
@@ -169,9 +172,7 @@ class _DuckCypherTransformer(Transformer):
             raise ValueError(f"Invalid return clause: {clause}")
 
         ret = {}
-        ret.update(
-            clause[0] if isinstance(clause[0], dict) else {ENTITY_ID: clause[0]}
-        )
+        ret.update(clause[0] if isinstance(clause[0], dict) else {ENTITY_ID: clause[0]})
         if len(clause) == 2:
             # has alias
             ret.update({ALIAS: clause[1].value})
@@ -181,7 +182,15 @@ class _DuckCypherTransformer(Transformer):
         return {TYPE: RETURN, RETURN: clause}
 
     def order_by_clause(self, order_by):
-        return {TYPE: ORDER_BY, ORDER_BY: order_by}
+        direction = order_by[-1]
+        entity_alias, col = order_by[0].split(".")
+        return {
+            TYPE: ORDER_BY,
+            ORDER_BY: {ALIAS: entity_alias, COLUMN: col, **direction},
+        }
+
+    def order_by_direction(self, direction):
+        return {DIRECTION: direction[0].value if direction else "asc"}
 
     def limit_clause(self, limit):
         limit = int(limit[-1])

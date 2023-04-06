@@ -6,6 +6,8 @@ import duckdb
 from duckcypher.constants import (
     ALIAS,
     AND,
+    COLUMN,
+    DIRECTION,
     ENTITY_ID,
     ENTITY_TYPES,
     FILTERS,
@@ -13,6 +15,7 @@ from duckcypher.constants import (
     MATCH,
     OP,
     OR,
+    ORDER_BY,
     QUERY,
     RESULT,
     RETURN,
@@ -22,7 +25,7 @@ from duckcypher.constants import (
     TYPE,
     WHERE,
 )
-from pypika import Field, Table, Query, functions as fn
+from pypika import Field, Table, Query, functions as fn, Order
 
 from duckcypher.schema import (
     find_join_fields,
@@ -84,6 +87,7 @@ def _process_single_query(schema, query, previous_result):
         query.get(WHERE),
         query[RETURN],
         query.get(LIMIT),
+        query.get(ORDER_BY),
         previous_table,
     )
 
@@ -124,7 +128,9 @@ def shortuuid(k=4) -> str:
     return "".join(random.choices(string.ascii_lowercase, k=k))
 
 
-def _process_match_query(schema, match, where, return_clause, limit, previous_table):
+def _process_match_query(
+    schema, match, where, return_clause, limit, order_by, previous_table
+):
     join_tables = _find_join_tables(schema, match)
     if previous_table:
         join_tables.append(previous_table)
@@ -188,7 +194,17 @@ def _process_match_query(schema, match, where, return_clause, limit, previous_ta
     q = q.select(*select_terms)
     if limit:
         q = q.limit(limit)
-
+    if order_by:
+        entity_alias, column, direction = (
+            order_by[ALIAS],
+            order_by[COLUMN],
+            order_by[DIRECTION],
+        )
+        target_table = _find_target_join_table(join_tables, entity_alias)
+        _ignored, field = get_field(
+            schema, target_table[ENTITY_TYPES][entity_alias], column
+        )
+        q = q.orderby(Field(field, table=target_table[TABLE]), order=Order.asc if direction == "asc" else Order.desc)
     return q.get_sql()
 
 
