@@ -54,7 +54,7 @@ def load_from_schema(schema: Dict):
 def _copy_data(conn, data_mappings):
     for mapping in data_mappings:
         node_or_edge, duckdb_commands = mapping[TYPE], mapping[DUCKDB]
-        with tempfile.NamedTemporaryFile(suffix='.parquet') as temp_file:
+        with tempfile.NamedTemporaryFile(suffix=".parquet") as temp_file:
             for command in duckdb_commands[:-1]:
                 duckdb.execute(command)
             final_result = duckdb.execute(duckdb_commands[-1]).arrow()
