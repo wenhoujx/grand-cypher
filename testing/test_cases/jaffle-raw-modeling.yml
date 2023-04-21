@@ -1,0 +1,54 @@
+tables: 
+  - name: payments
+    type: csv
+    path: ~/code/datas/jaffle-shop/raw_payments.csv
+  - name: orders
+    type: csv
+    path: ~/code/datas/jaffle-shop/raw_payments.csv
+  - name: customers
+    type: csv
+    path: ~/code/datas/jaffle-shop/raw_payments.csv
+entities: 
+  - type: Customer 
+    columns: 
+      - name: id
+      - name: first_name 
+      - name: last_name 
+  - type: Payment 
+    columns: 
+      - name: id 
+      - name: payment_method 
+      - name: amount 
+  - type: Order 
+    columns:
+      - name: id 
+      - name: order_date 
+      - name: status 
+
+mappings: 
+  # payments table 
+  - field: payments.id 
+    column: Payment.id 
+  - field: payments.payment_method
+    column: Payment.payment_method
+  - field: payments.amount
+    column: Payment.amount    
+  - field: payments.order_id
+    column: Order.id 
+  # orders table 
+  - field: orders.id
+    column: Order.id 
+  - field: orders.order_date
+    column: Order.order_date
+  - field: orders.status
+    column: Order.status
+  - field: orders.user_id
+    column: Customer.id
+  # customers table 
+  - field: customers.id
+    column: Customer.id 
+  - field: customers.first_name
+    column: Customer.first_name
+  - field: customers.last_name
+    column: Customer.last_name
+  

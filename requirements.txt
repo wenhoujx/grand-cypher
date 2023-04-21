@@ -9,3 +9,5 @@ pyyaml
 duckdb
 toolz
 jupyterlab
+kuzu 
+black 

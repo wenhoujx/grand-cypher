@@ -1,5 +1,21 @@
-from duckcypher.constants import NAME, PATH, TABLES, TYPE
+from duckcypher.constants import (
+    ALIAS,
+    ENTITY_ID,
+    FIELD,
+    FROM,
+    MAPPINGS,
+    NAME,
+    NODE,
+    NODE_TYPE,
+    NODES,
+    PATH,
+    PROPERTIES,
+    TABLES,
+    TO,
+    TYPE,
+)
 from duckcypher.parser import run_cypher
+from duckcypher.to_sql import _process_single_match
 import yaml
 import os
 import duckdb
@@ -163,3 +179,72 @@ class TestSimple:
         assert (len(res)) == 1, "one row"
         assert "Scott" in res[0], "Scott is the oldest"
         assert res[0][-1] == 79, "Scott is 79"
+
+
+class TestParseJoin:
+    def setup_class(cls):
+        cls.base_customer_schema = {
+            NODES: [
+                {
+                    NAME: "Customer",
+                    PROPERTIES: [
+                        {
+                            NAME: "id",
+                            TYPE: "string",
+                        },
+                        {
+                            NAME: "name",
+                            TYPE: "string",
+                        },
+                        {
+                            NAME: "age",
+                            TYPE: "int",
+                        },
+                    ],
+                }
+            ]
+        }
+
+    def test_simple(self):
+        schema = {
+            **self.base_customer_schema,
+            TABLES: [
+                {
+                    NAME: "customer",
+                    TYPE: "csv",
+                    PATH: "tests/data/customer.csv",
+                },
+            ],
+            MAPPINGS: [
+                {
+                    TYPE: NODE,
+                    FROM : 'customer.id', 
+                    TO: 'Customer.id',
+                }, 
+                {
+                    TYPE: NODE,
+                    FROM : 'customer.id', 
+                    TO: 'Customer.id',
+                }, 
+                {
+                    TYPE: NODE,
+                    FROM : 'customer.id', 
+                    TO: 'Customer.id',
+                }, 
+                {
+                    TYPE: NODE,
+                    FROM : 'customer.id', 
+                    TO: 'Customer.id',
+                }, 
+            ],
+        }
+        _process_single_match(
+            [
+                {ALIAS: "customer", NODE_TYPE: "Customer"},
+            ],
+            [
+                {
+                    ENTITY_ID: "customer.age",
+                }
+            ],
+        )

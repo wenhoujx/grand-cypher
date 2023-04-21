@@ -1,0 +1,29 @@
+version: 1
+nodes:
+  - name: Employee
+    properties:
+      - name: id
+        primary: true 
+        type: string 
+      - name: name
+        type: string
+      - name: age
+        type: int16
+edges: 
+  - name: ReportsTo
+    source: Employee
+    target: Employee
+tables:
+  - name: employee
+    type: csv
+    path: data/employee.csv
+mappings:
+  - type: node 
+    employee.id: Employee.id
+    employee.name: Employee.name
+    employee.age: Employee.age
+  - type: edge
+    edge: ReportsTo
+    from: employee.id
+    to: employee.manager
+    

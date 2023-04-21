@@ -1,0 +1,24 @@
+version: 1
+nodes:
+  - name: Customer
+    properties:
+      - name: id
+        primary: true
+        type: string
+      - name: name
+        type: string
+      - name: age
+        type: int16
+tables:
+  - name: customer_name
+    type: csv
+    path: data/customer_name.csv
+  - name: customer_age
+    type: csv
+    path: data/customer_age.csv
+mappings:
+  - type: node
+    customer_name.id: Customer.id
+    customer_name.name: Customer.name
+    customer_age.age: Customer.age
+    customer_age.id: Customer.id

@@ -1,0 +1,15 @@
+version: 1
+nodes:
+  - name: Customer
+    properties:
+      - name: id
+        primary: true
+        type: string
+      - name: first_name
+        type: string
+      - name: last_name
+        type: string
+data: 
+  - type: Customer 
+    duckdb: 
+    - "select * from './data/raw_customers.csv'"

@@ -13,6 +13,7 @@ from duckcypher.constants import (
     FILTERS,
     LIMIT,
     MATCH,
+    NODE_TYPE,
     OP,
     OR,
     ORDER_BY,
@@ -127,6 +128,15 @@ def _split_entity_id(entity_id):
 def shortuuid(k=4) -> str:
     return "".join(random.choices(string.ascii_lowercase, k=k))
 
+def _process_single_match(schema, match, return_clause): 
+    join_tables = []
+    alias_to_node_types = dict(tz.thread_last(
+        match, 
+        (map, lambda mat: (mat[ALIAS], mat[NODE_TYPE])),
+    ))
+    for mat in match: 
+        ... 
+        
 
 def _process_match_query(
     schema, match, where, return_clause, limit, order_by, previous_table
