@@ -1,4 +1,5 @@
 from gettext import find
+import os
 import tempfile
 from typing import Dict
 import kuzu
@@ -35,6 +36,14 @@ def _random_id(k=8):
     return "".join(random.choices(string.ascii_letters, k=k))
 
 
+def _create_directory_if_not_exists(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+
+TESTDB_ROOT = "./testdbs"
+
+
 def load_from_schema(schema: Dict):
     # returns a kuzu connection
     nodes, edges, data = (
@@ -43,7 +52,9 @@ def load_from_schema(schema: Dict):
         schema.get(DATA, []),
     )
     # todo: reuse table?
-    db = kuzu.Database(f"./db-{_random_id()}")
+    # create testdbs folder if not exists
+    _create_directory_if_not_exists(TESTDB_ROOT)
+    db = kuzu.Database(os.path.join(TESTDB_ROOT, f"testdb-{_random_id()}"))
     conn = kuzu.Connection(db)
     _create_nodes(conn, nodes)
     _create_edges(conn, edges)

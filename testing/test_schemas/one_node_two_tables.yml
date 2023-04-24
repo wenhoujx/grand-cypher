@@ -1,0 +1,20 @@
+version: 1
+nodes:
+  - name: Person
+    properties:
+      - name: id
+        primary: true
+        type: string
+      - name: name
+        type: string
+      - name: age
+        type: int64
+      - name: state
+        type: string
+      - name: gender
+        type: string
+data:
+  - type: Person
+    # kuzu doesn't like it when csv misses a column :(
+    duckdb:
+      - "select a.id as id, a.name as name, a.age as age, a.state as state, b.Gender as gender from './data/persons.csv' a  join './data/person_genders.csv' b on a.id = b.ID"

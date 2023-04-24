@@ -1,0 +1,17 @@
+version: 1
+nodes:
+  - name: Person
+    properties:
+      - name: id
+        primary: true
+        type: string
+      - name: name 
+        type: string 
+      - name: age
+        type: int64
+      - name: state 
+        type: string
+data: 
+  - type: Person
+    duckdb: 
+    - "select * from './data/persons.csv'"
