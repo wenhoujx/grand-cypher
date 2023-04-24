@@ -26,3 +26,8 @@ class TestModeling:
         assert res.iloc[0,0] == 'Male'
         res = conn.execute("match (p:Person {name: 'John Smith'}) return p.gender as gender").get_as_df()
         assert res.iloc[0,0] == 'Female'
+
+    def test_two_nodes_one_table(self): 
+        conn = load_from_schema(_load_yaml("testing/test_schemas/two_nodes_one_table.yml"))
+        res = conn.execute("match (p:Person {name: 'Mary Anderson' }) -[:LIVES_IN]-> (s:State)  return s.name").get_as_df()
+        assert(res.iloc[0,0] == 'Texas')
