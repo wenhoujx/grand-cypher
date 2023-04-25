@@ -1,38 +1,32 @@
 version: 1
 nodes:
-  - name: Customer
+  - name: Person
     properties:
       - name: id
-        primary: true 
+        primary: true
         type: string
       - name: name
         type: string
       - name: age
-        type: int16
-  - name: Company
-    properties: 
-      - name: name 
+        type: int64
+  - name: State
+    properties:
+      - name: name
         primary: true
         type: string
-edges: 
-  - name: WorksAt
-    source: Customer
-    target: Company
-tables:
-  - name: customer 
-    type: csv
-    path: data/customer.csv
-  - name: company
-    type: csv
-    path: data/company.csv
-mappings:
-  - type: node
-    customer.id: Customer.id 
-    customer.name: Customer.name 
-    customer.age: Customer.age
-    company.company: Company.name 
-  - type: edge
-    edge: WorksAt
-    from: customer.id
-    to: customer.company
-    
+      - name: short_name
+        type: string
+edges:
+  - name: LIVES_IN
+    from: Person
+    to: State
+data:
+  - type: Person
+    duckdb:
+      - "select * from './data/persons.csv'"
+  - type: State
+    duckdb:
+      - "select * from read_csv_auto('./data/states.csv', header=True)"
+  - type: LIVES_IN
+    duckdb:
+      - "select id, state as name from './data/persons.csv'"

@@ -10,20 +10,13 @@ nodes:
       - name: age
         type: int16
 edges: 
-  - name: ReportsTo
-    source: Employee
-    target: Employee
-tables:
-  - name: employee
-    type: csv
-    path: data/employee.csv
-mappings:
-  - type: node 
-    employee.id: Employee.id
-    employee.name: Employee.name
-    employee.age: Employee.age
-  - type: edge
-    edge: ReportsTo
-    from: employee.id
-    to: employee.manager
-    
+  - name: REPORTS_TO
+    from: Employee
+    to: Employee
+data: 
+  - type : Employee
+    duckdb: 
+    - "select * from read_csv_auto('./data/employees.csv', header=True)"
+  - type : REPORTS_TO
+    duckdb:
+    - "select employee_id, manager from read_csv_auto('./data/employees.csv', header=True) a where a.manager is not null"

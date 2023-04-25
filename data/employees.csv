@@ -1,0 +1,8 @@
+employee_id,name,age,manager
+1,John Smith,35,
+2,Jane Doe,28,1
+3,Bob Johnson,42,1
+4,Mary Jones,26,2
+5,Tom Davis,39,2
+6,Alice Green,31,3
+7,Mike Brown,47,3
